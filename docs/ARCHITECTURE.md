@@ -68,9 +68,9 @@ transport driver invokes platform or network APIs.
 
 ## Shared contracts
 
-The following Dart-like interfaces define the intended public boundary. Exact
-names can evolve during implementation, but their responsibilities and
-separation must be retained.
+The following interfaces are implemented by `packages/lazerus_core`. Names can
+evolve with an intentional compatibility decision, but their responsibilities
+and separation must be retained.
 
 ### Transport contract
 
@@ -121,6 +121,7 @@ limitations rather than concealing them behind a generic interface.
 ```dart
 abstract interface class LightingProtocolAdapter {
   String get id;
+  int get selectionPriority;
   Set<TransportKind> get supportedTransports;
 
   ProtocolDiscoverySpec discoverySpecFor(TransportKind transport);
@@ -158,6 +159,32 @@ connection and returns a confidence, reason, and whether a probe is needed. A
 probe is allowed only when it is documented as safe for an unknown device; it
 must be minimal, time-bounded, cancellable, and diagnostic-visible. The adapter
 returns `unsupported` or `unverified` rather than guessing a command format.
+
+`ProtocolAdapterRegistry` filters adapters by transport, then sorts candidates
+by match confidence, explicit adapter priority, and adapter ID. It reports an
+equal confidence/priority as ambiguous even though the ID provides a stable
+ordering for diagnostics. The application must not choose an ambiguous device
+silently for normal control.
+
+## Package implementation
+
+The repository currently contains these Flutter-compatible Dart packages:
+
+```text
+packages/
+  lazerus_core/                # shared contracts and adapter registry
+  lazerus_proto_lotus_lamp_x/  # initial BLE/ELK protocol adapter and E1 codec
+```
+
+`lazerus_core` contains no Flutter widgets, BLE-plugin calls, or platform API
+calls. It is the only dependency of protocol adapters. Its models make endpoint
+metadata, transport receipts, capabilities, observations, and command outcomes
+explicit. A transport implementation will depend on the same package later.
+
+`lazerus_proto_lotus_lamp_x` consumes those contracts. It does not implement
+`BleTransport`; it accepts an already-connected `TransportSession` and sends
+encoded messages to the specified write channel. This preserves the boundary
+between protocol framing and CoreBluetooth/plugin integration.
 
 `openSession` maps the generic transport session to the protocol's service,
 characteristics, endpoints, handshake, encryption, and codec behavior. The
@@ -310,22 +337,24 @@ rate. It must not create an independent unbounded command queue. A scheduler
 may use a common logical timestamp for multi-device frames, but it must never
 claim atomic delivery across BLE or any other independent transport path.
 
-## Initial implementation boundary
+## Current implementation boundary
 
-The first usable slice implements only:
+The current package slice implements only:
 
-- `BleTransport` backed by the selected Flutter/native CoreBluetooth boundary;
-- `ElkProtocolAdapter` for the initial ELK/Lotus Lantern family;
-- general BLE discovery plus adapter-provided name/service hints;
-- safe, opt-in diagnostic probing where required;
-- common power, RGB color, and brightness operations after physical validation;
-- per-device persistent sessions, a bounded scheduler, and diagnostics; and
-- persistence of the application device ID, BLE binding, adapter ID, and
-  capability snapshot.
+- shared transport/protocol/session/capability contracts and deterministic
+  adapter selection;
+- `LotusLampXProtocolAdapter` with BLE name/service discovery hints;
+- plain E1 encoding for power, RGB color, brightness, and four native-effect
+  IDs inferred from the public LotusLampX reference; and
+- opt-in transport-session writes for diagnostic use, with all capabilities
+  marked `inferred`.
 
-All ELK GATT mappings and commands beyond those physically validated remain
-unverified. The implementation must not claim native effects, acknowledgement,
-or maximum rate until tested on the target hardware.
+It does **not** yet implement a `BleTransport`, CoreBluetooth integration,
+active GATT probing, encrypted framing, notification decoding, a scheduler,
+database persistence, a Flutter application, or physical-hardware validation.
+The adapter rejects inferred commands by default. An implementation may enable
+them only through an explicitly chosen diagnostic session; normal UI must not
+present them as supported.
 
 ## Module placement
 

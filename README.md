@@ -1,4 +1,3 @@
-Lazerus project to dynamically control light devices via Bluetooth.
 # Lazerus
 
 > Local, cross-platform lighting control for macOS and iOS — starting with
@@ -18,13 +17,30 @@ internet connection during normal use.
 
 ## Project status
 
-This repository is currently in the specification and foundation-planning
-stage. The authoritative product requirements are in
+This repository contains the specification and the first implementation slice:
+two Flutter-compatible Dart packages for common contracts and the initial Lotus
+Lamp X protocol adapter. The authoritative product requirements are in
 [`docs/TECHNICAL_SPECIFICATIONS.md`](docs/TECHNICAL_SPECIFICATIONS.md).
 
-The Flutter application has not yet been scaffolded, so there are intentionally
-no build, run, or test commands to execute yet. As implementation starts, the
-README will gain platform prerequisites and reproducible development commands.
+The host Flutter application, a `BleTransport` implementation, persistence, UI,
+and physical-hardware validation have not yet been implemented. The existing
+Lotus Lamp X adapter performs only transport-neutral matching and E1 frame
+encoding; inferred commands are disabled unless a diagnostic session explicitly
+opts in.
+
+## Packages
+
+| Package | Responsibility | Status |
+| --- | --- | --- |
+| [`packages/lazerus_core`](packages/lazerus_core) | Transport, discovery, protocol-adapter, session, capability, command, and result contracts. | Implemented and tested |
+| [`packages/lazerus_proto_lotus_lamp_x`](packages/lazerus_proto_lotus_lamp_x) | BLE discovery signals, inferred ELK/Lotus Lamp X E1 codec, capability profile, and adapter/session implementation. | Implemented; hardware validation pending |
+
+Run checks from each package directory:
+
+```sh
+flutter test
+dart analyze
+```
 
 ## What Lazerus will do
 
@@ -78,6 +94,8 @@ name, UUID, MAC address, protocol variant, or transport implementation.
 The detailed contract model, discovery and selection sequence, capability
 layers, persistence model, and extension path are documented in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The initial BLE profile and validation record are in
+[`docs/BLE_PROTOCOLS.md`](docs/BLE_PROTOCOLS.md).
 
 Protocol references for validation and research include:
 
