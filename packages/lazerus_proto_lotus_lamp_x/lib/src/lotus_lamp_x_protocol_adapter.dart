@@ -220,6 +220,7 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
   final StreamController<DeviceObservation> _observations =
       StreamController<DeviceObservation>.broadcast();
   late final StreamSubscription<TransportMessage> _incomingSubscription;
+  DesiredLightingState? _lastKnownState;
   var _isClosed = false;
 
   @override
@@ -227,6 +228,9 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
 
   @override
   Stream<DeviceObservation> get observations => _observations.stream;
+
+  @override
+  DesiredLightingState? get lastKnownState => _lastKnownState;
 
   @override
   Future<CommandResult> execute(LightingCommand command) async {
@@ -286,6 +290,7 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
         ? CommandOutcome.transmitted
         : CommandOutcome.queued;
 
+    _rememberCommand(command);
     return CommandResult(
       command: command,
       outcome: outcome,
@@ -293,6 +298,27 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
       detail:
           'Frames were accepted by the transport; physical execution is unconfirmed.',
     );
+  }
+
+  @override
+  Future<void> requestCurrentState() async {
+    if (_isClosed) {
+      return;
+    }
+    final message = await transportSession.read(
+      LotusLampXBleIdentifiers.notifyCharacteristicUuid,
+    );
+    if (message == null) {
+      _observations.add(
+        DeviceObservation(
+          kind: DeviceObservationKind.notification,
+          detail:
+              'FFF4 is not readable; waiting for controller notifications instead.',
+        ),
+      );
+      return;
+    }
+    _onIncomingMessage(message);
   }
 
   @override
@@ -369,13 +395,45 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
     if (_isClosed) {
       return;
     }
+    final state = LotusLampXFrameCodec.tryDecodeE1State(message.payload);
+    if (state != null) {
+      _lastKnownState = _mergeState(_lastKnownState, state);
+    }
     _observations.add(
       DeviceObservation(
-        kind: DeviceObservationKind.rawProtocolMessage,
+        kind: state == null
+            ? DeviceObservationKind.rawProtocolMessage
+            : DeviceObservationKind.state,
+        state: state == null ? null : _lastKnownState,
         rawData: message.payload,
-        detail:
-            'Raw message received on ${message.channel ?? 'the default channel'}.',
+        detail: state == null
+            ? 'Raw message received on ${message.channel ?? 'the default channel'}.'
+            : 'Best-effort E1 state decoded from ${message.channel ?? 'the default channel'}.',
       ),
+    );
+  }
+
+  void _rememberCommand(LightingCommand command) {
+    final state = switch (command) {
+      SetPower(:final enabled) => DesiredLightingState(power: enabled),
+      SetColor(:final color) => DesiredLightingState(color: color),
+      SetBrightness(:final value) => DesiredLightingState(brightness: value),
+      ApplyLightingState(:final state) => state,
+      _ => null,
+    };
+    if (state != null) {
+      _lastKnownState = _mergeState(_lastKnownState, state);
+    }
+  }
+
+  static DesiredLightingState _mergeState(
+    DesiredLightingState? previous,
+    DesiredLightingState incoming,
+  ) {
+    return DesiredLightingState(
+      power: incoming.power ?? previous?.power,
+      color: incoming.color ?? previous?.color,
+      brightness: incoming.brightness ?? previous?.brightness,
     );
   }
 }

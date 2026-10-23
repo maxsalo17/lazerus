@@ -10,14 +10,15 @@ controller/firmware profile.
 | Evidence level | Meaning | Ordinary UI behavior |
 | --- | --- | --- |
 | `verified` | Physically tested and recorded for the device/profile. | May present the capability. |
-| `inferred` | Derived from a reference implementation or reverse engineering. | Hide from normal controls; permit only an explicit diagnostic opt-in. |
+| `inferred` | Derived from a reference implementation or reverse engineering. | Do not present it in ordinary controls until it is validated for the active device profile. |
 | `unsupported` | Absent, incompatible, or intentionally not implemented. | Do not present the capability. |
 
 ## Lotus Lamp X / ELK initial profile
 
 **Adapter ID:** `lazerus.protocol.lotus_lamp_x`  
 **Transport:** BLE only  
-**Status:** adapter and codec implemented; Lazerus hardware validation pending.
+**Status:** adapter and codec implemented; basic command delivery reported on
+two locally tested strips, with broader profile validation pending.
 
 The profile is based on the public
 [LotusLampX protocol module](https://github.com/l0lsec/LotusLampX/blob/main/cli/protocol.py).
@@ -45,9 +46,9 @@ from LotusLampX for these operations:
 
 | Operation | Core command | Adapter evidence | Lazerus validation |
 | --- | --- | --- | --- |
-| Power | `SetPower` | Inferred | Pending |
-| RGB color | `SetColor` | Inferred | Pending |
-| Brightness (normalized 0–1) | `SetBrightness` | Inferred | Pending |
+| Power | `SetPower` | Inferred | Reported working on the current two-strip setup; detailed record pending |
+| Saturated red-to-violet color | `SetColor` | Inferred | Reported working on the current two-strip setup; detailed record pending |
+| Brightness (normalized 0–1) | `SetBrightness` | Inferred | Reported working on the current two-strip setup; detailed record pending |
 | Jump, strobe, breathe, warning | `SetNativeEffect` | Inferred | Pending |
 
 The adapter can also encode an `ApplyLightingState` as a deterministic sequence:
@@ -55,12 +56,68 @@ when powering on, color and brightness precede power-on; when powering off, only
 the off frame is sent. A future scheduler will own inter-command priority,
 coalescing, rate limiting, and retries.
 
+### App transport integration
+
+`apps/lazerus_app` now provides a generic BLE transport implementation. It
+scans without requiring FFF0 to be advertised, lets the adapter classify
+ELK/MELK candidates, automatically connects matched candidates, discovers GATT
+services after connection, and routes adapter frames to FFF3 by the adapter's
+declared channel. The transport also forwards FFF4 (and any other enabled GATT
+notification) as raw data. When FFF4 advertises the standard GATT `read`
+property, the adapter can also request one value after connection or from the
+local Logs screen; it never attempts arbitrary GATT reads from UI code.
+
+The adapter records every inbound packet in the local Logs screen. It recognizes
+only E1-shaped packets matching the currently encoded power, RGB, or brightness
+commands and displays a partial `best-effort` observation for those packets.
+All other payloads remain raw hexadecimal data. Neither case confirms that a
+controller accepted a prior command or describes a documented FFF4 state
+protocol; hardware validation is still required.
+
+For the active application session, the Lotus adapter merges every successfully
+accepted power, color, or brightness command into a partial protocol-side
+`lastKnownState`. A recognized inbound E1 packet updates the same snapshot.
+The app separately retains desired colour for group and individual controls, so
+a per-device calibration does not make a group card display the adjusted
+transport colour. Neither snapshot claims a physical readback. The session
+snapshot is in memory only and is discarded when its protocol session closes.
+
+The application displays the matching reason, connection state,
+capability evidence, GATT-write result, and basic power/RGB/brightness actions.
+The current control screens expose basic power/RGB/brightness operations after
+the reported successful two-strip local test. The generic adapter capability
+remains `inferred` until a reproducible device/firmware-specific record is
+captured, so this is not a compatibility promise for future matches. Automated
+integration is covered by mock transport tests; it is not a replacement for
+physical-protocol validation.
+
+For the current Lotus X control surface, the colour picker deliberately emits
+only fully saturated colours on the red-to-violet arc. It does not offer white
+or black as `SetColor` values. Brightness is a separate command and can still
+make the displayed colour dark. Drag updates are sampled at most once per
+100 ms with replacement of stale pending values; this is a local UI safeguard,
+not the centralized scheduler required by the full specification.
+
+The app can optionally apply a manual, per-device hue curve to that same
+red-to-violet command arc. It is a local, best-effort correction for nonlinear
+strips, applied before this adapter encodes E1 RGB bytes. It does not modify
+the inferred codec, prove an emitted colour, or invert FFF4 observations. The
+curve behaviour and storage are documented in
+[`COLOR_CALIBRATION.md`](COLOR_CALIBRATION.md); calibration accuracy remains
+hardware validation work.
+
 ### Explicitly not supported yet
 
 - Encrypted framing for ELK variants.
 - Active GATT probing or capability interrogation.
-- Semantic decoding of FFF4 notifications.
+- Validated semantic decoding of FFF4 notifications or reads. The existing
+  E1-shaped decode is diagnostics-only and explicitly best-effort.
 - Controller state confirmation or protocol acknowledgements.
+- Complete device persistence/relinking, reconnect policy, or centralized
+  command scheduling. The app has only a narrow local identity binding,
+  custom-group store, and control-level drag coalescer behind repositories;
+  it is not the planned Drift/SQLite
+  device database.
 - Effect-speed, warm/cold-white, scenes, microphone, timers, sensors, reset,
   and any destructive command.
 - Measured maximum update rate, multi-device synchronization, or reconnect
@@ -72,10 +129,12 @@ safety treatment, and physical validation.
 
 ## Hardware-validation record
 
-No Lazerus protocol-frame validation has been recorded yet. The existing
-integration evidence is limited to discovery and successful connection of an
-`ELK-BLEDDM` controller on macOS. A successful write without response is not
-evidence that the controller executed a command.
+The user reported that two physical strips automatically connected and received
+commands through the Lazerus app on 2026-10-23. This is evidence for the
+current local setup, but the device model, firmware, operating system, exact
+commands, and sustained rate were not captured. It must not be generalized to
+all Lotus/ELK variants. A successful write without response is not by itself
+evidence that a controller executed a command.
 
 For each validation session, add a row with controller model/name, platform,
 firmware if available, transport settings, command, expected state, observed
@@ -84,4 +143,4 @@ identifier, user location, or unrelated nearby-device data.
 
 | Date | Device/profile | Operation | Result | Rate/notes |
 | --- | --- | --- | --- | --- |
-| — | — | — | Pending physical validation | — |
+| 2026-10-23 | Two locally tested strips; model/firmware not recorded | Auto-connect and app lighting commands | User reported both devices received commands | Exact command set and sustained rate pending |

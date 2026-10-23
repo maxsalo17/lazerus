@@ -66,6 +66,23 @@ library. Features do not communicate with a transport or adapter directly.
 Only the device runtime invokes a selected protocol-aware session, and only a
 transport driver invokes platform or network APIs.
 
+### Per-device colour calibration
+
+Per-device colour calibration is an application-domain command transformation,
+not a BLE transport feature and not a protocol-adapter special case. A profile
+maps a resolved desired `RgbColor` to a device's supported command hue after
+arbitration but immediately before `LightingDeviceSession.execute`. The adapter
+therefore continues to encode an ordinary `SetColor`, and a future adapter can
+declare different calibration dimensions without changing transport contracts.
+
+The runtime retains the desired colour for UI state and group-gradient
+aggregation, while the protocol-side/observed state can contain the corrected
+transport colour. Neither is a confirmed physical output. Calibration editing
+uses a temporary resolver override and goes through the ordinary replaceable
+lighting-command ticker; widgets never send raw GATT data. The current
+typed/profile JSON model and its intentional local-storage exception are in
+[`COLOR_CALIBRATION.md`](COLOR_CALIBRATION.md).
+
 ## Shared contracts
 
 The following interfaces are implemented by `packages/lazerus_core`. Names can
@@ -94,6 +111,7 @@ abstract interface class TransportSession {
   Stream<TransportMessage> get incomingMessages;
 
   Future<TransportReceipt> send(TransportMessage message);
+  Future<TransportMessage?> read(String channel);
   Future<void> disconnect();
 }
 ```
@@ -112,9 +130,10 @@ not proof of physical execution.
 
 `TransportCapabilities` describes the path rather than the light: supported
 discovery modes, connection persistence, background/restoration constraints,
-message size, delivery acknowledgements, notification support, and applicable
-platform limits. The BLE implementation must expose actual CoreBluetooth/iOS
-limitations rather than concealing them behind a generic interface.
+message size, delivery acknowledgements, notification and declared-channel read
+support, and applicable platform limits. The BLE implementation must expose
+actual CoreBluetooth/iOS limitations rather than concealing them behind a
+generic interface.
 
 ### Protocol-adapter contract
 
@@ -141,8 +160,10 @@ abstract interface class LightingDeviceSession {
   String get protocolAdapterId;
   DeviceCapabilities get capabilities;
   Stream<DeviceObservation> get observations;
+  DesiredLightingState? get lastKnownState;
 
   Future<CommandResult> execute(LightingCommand command);
+  Future<void> requestCurrentState();
   Future<void> close();
 }
 ```
@@ -179,7 +200,8 @@ packages/
 `lazerus_core` contains no Flutter widgets, BLE-plugin calls, or platform API
 calls. It is the only dependency of protocol adapters. Its models make endpoint
 metadata, transport receipts, capabilities, observations, and command outcomes
-explicit. A transport implementation will depend on the same package later.
+explicit. Transport implementations depend on the same package rather than on
+a protocol package.
 
 `lazerus_proto_lotus_lamp_x` consumes those contracts. It does not implement
 `BleTransport`; it accepts an already-connected `TransportSession` and sends
@@ -339,22 +361,95 @@ claim atomic delivery across BLE or any other independent transport path.
 
 ## Current implementation boundary
 
-The current package slice implements only:
+The current implementation includes:
 
 - shared transport/protocol/session/capability contracts and deterministic
   adapter selection;
 - `LotusLampXProtocolAdapter` with BLE name/service discovery hints;
 - plain E1 encoding for power, RGB color, brightness, and four native-effect
   IDs inferred from the public LotusLampX reference; and
-- opt-in transport-session writes for diagnostic use, with all capabilities
-  marked `inferred`.
+- transport-session writes for the locally exercised basic profile, while
+  broader Lotus/ELK capability claims remain `inferred`;
+- `apps/lazerus_app`, an iOS/macOS Flutter application using Riverpod;
+- `BluetoothLowEnergyTransport`, which waits for the native BLE adapter to
+  reach `poweredOn` before the initial general scan, then owns connection,
+  GATT discovery, characteristic selection by requested channel, bounded
+  characteristic-write fragmentation, and transport receipts; and
+- a device controller that combines adapter discovery signals, lists only
+  unambiguous supported candidates, connects them automatically, and renders
+  transport/protocol status plus guarded power, RGB, and brightness controls.
+- a local application-device identity binding that keeps platform BLE IDs as
+  mutable locators rather than group membership identifiers; and
+- immutable protocol-wide `Common` groups plus locally persisted custom groups
+  with manual and protocol-based automatic membership.
 
-It does **not** yet implement a `BleTransport`, CoreBluetooth integration,
-active GATT probing, encrypted framing, notification decoding, a scheduler,
-database persistence, a Flutter application, or physical-hardware validation.
-The adapter rejects inferred commands by default. An implementation may enable
-them only through an explicitly chosen diagnostic session; normal UI must not
-present them as supported.
+The app resolves GATT UUIDs at runtime. A platform BLE identifier remains only
+an in-memory endpoint locator; it is not a saved Lazerus device identity.
+`BluetoothLowEnergyTransport` enables declared GATT notifications and forwards
+their raw payloads. It can read a declared GATT channel only when that
+characteristic exposes the GATT `read` property. The Lotus adapter records raw
+FFF4 data and recognizes E1-shaped power/RGB/brightness packets as
+best-effort observations for the local Logs screen; no protocol currently
+interprets those payloads as a confirmed lighting state.
+
+Each active protocol session also keeps a partial `lastKnownState`: successful
+transport writes merge into it, as do recognized protocol observations. The
+app surface mirrors that local state per device, so group and individual cards
+stay synchronized during the running session. It is explicitly separate from
+confirmed hardware state and is not yet stored in the planned device database.
+
+The initial local device profile has been exercised successfully by the user on
+two physical strips. The app therefore exposes basic power, color, and
+brightness controls for the currently discovered profile. The generic adapter
+still labels its wider Lotus/ELK capability claims as inferred until a
+controller model, firmware, exact commands, and repeatable results are
+recorded. `transmitted` and `acknowledged` mean only that the transport accepted
+the frame or received a GATT response; neither means that the controller changed
+its output.
+
+Custom-group definitions and the narrow device-identity binding map currently
+use a versioned local settings store behind repositories. This keeps the screen
+functional offline and avoids treating BLE IDs as group identities, but it is
+not the final structured device database required by the specification. Migrate
+these repositories to the planned Drift/SQLite database together with device
+metadata, relinking, migrations, and referential-integrity handling before
+claiming complete device persistence.
+
+It does **not** yet implement active GATT probing, encrypted framing, validated
+notification decoding, a centralized scheduler, a complete structured device
+database/relink flow, reconnection policy, scenes, pipelines, or macOS
+menu-bar controls. The macOS runner hides the main window on close and reopens
+it when activated, but it does not yet offer the required background menu-bar
+controls. Basic controls are available for the locally exercised profile; that
+does not validate the generic adapter's wider inferred claims.
+
+### App discovery and control flow
+
+```text
+Debug page starts a bounded general BLE scan
+             │
+             ▼
+BluetoothLowEnergyTransport emits transport endpoints
+             │
+             ▼
+ProtocolAdapterRegistry selects an unambiguous adapter candidate
+             │
+             ▼
+DebugDevicesController connects and opens a protocol session
+             │
+             ├── status/capability view state ──► Flutter UI
+             │
+             └── control intent ──────────────► common LightingCommand
+                                                    │
+                                                    ▼
+                                           selected protocol codec + BLE write
+```
+
+The UI has no direct BLE-plugin import. It issues common commands to the
+feature controller, which checks selected-session capabilities and prevents
+overlapping commands per device before invoking the protocol session. Future user-facing controls
+must move through the scheduler boundary before they are allowed to stream or
+compete with other sources.
 
 ## Module placement
 

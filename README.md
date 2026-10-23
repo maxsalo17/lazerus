@@ -17,16 +17,38 @@ internet connection during normal use.
 
 ## Project status
 
-This repository contains the specification and the first implementation slice:
-two Flutter-compatible Dart packages for common contracts and the initial Lotus
-Lamp X protocol adapter. The authoritative product requirements are in
+This repository contains the specification, two Flutter-compatible Dart
+packages, and an iOS/macOS Flutter application with device, group, and control
+screens.
+The authoritative product requirements are in
 [`docs/TECHNICAL_SPECIFICATIONS.md`](docs/TECHNICAL_SPECIFICATIONS.md).
 
-The host Flutter application, a `BleTransport` implementation, persistence, UI,
-and physical-hardware validation have not yet been implemented. The existing
-Lotus Lamp X adapter performs only transport-neutral matching and E1 frame
-encoding; inferred commands are disabled unless a diagnostic session explicitly
-opts in.
+The app performs a general BLE scan, classifies only endpoints matched by an
+installed protocol adapter, and connects to those candidates automatically. It
+discovers GATT characteristics dynamically and surfaces connection/error state.
+Users can manually disconnect and reconnect devices, create local custom
+groups, add members manually, and choose automatic inclusion of newly found
+devices with a matching protocol. Immutable `Common` groups are derived from
+the shared protocol family.
+
+The first Lotus Lamp X controls provide power, a saturated red-to-violet colour
+palette, and brightness. Drag controls use a bounded 10 Hz replaceable-command
+ticker and flush their final value on release; they never generate black or
+white Lotus X colour commands. Two physical strips were reported by the user as automatically
+connected and responding to app commands on 2026-10-23. This validates the
+current local setup, not universal compatibility with every controller or
+firmware. A BLE write receipt is never presented as proof that a light changed.
+
+The **Devices** screen also supports selecting same-protocol controllers for
+per-device hue calibration. A local curve maps the colour selected in Lazerus
+to the command hue for that strip, with live preview while an anchor is moved.
+Calibration is never assigned to a group: group commands are corrected per
+member and group cards keep showing the intended member colours. Details and
+limitations are in [`docs/COLOR_CALIBRATION.md`](docs/COLOR_CALIBRATION.md).
+
+Identity bindings and custom groups are stored locally. A complete structured
+device database, relinking UI, reconnection policy, the central command
+scheduler, scenes, pipelines, and macOS menu-bar controls are still pending.
 
 ## Packages
 
@@ -34,8 +56,17 @@ opts in.
 | --- | --- | --- |
 | [`packages/lazerus_core`](packages/lazerus_core) | Transport, discovery, protocol-adapter, session, capability, command, and result contracts. | Implemented and tested |
 | [`packages/lazerus_proto_lotus_lamp_x`](packages/lazerus_proto_lotus_lamp_x) | BLE discovery signals, inferred ELK/Lotus Lamp X E1 codec, capability profile, and adapter/session implementation. | Implemented; hardware validation pending |
+| [`apps/lazerus_app`](apps/lazerus_app) | iOS/macOS Flutter surface with automatic BLE connection, device management, per-device hue calibration, protocol/common and custom groups, and compact/detail controls. | Implemented; broader hardware validation pending |
 
-Run checks from each package directory:
+Run the app on macOS:
+
+```sh
+cd apps/lazerus_app
+flutter pub get
+flutter run -d macos
+```
+
+Run checks from the package or app directory:
 
 ```sh
 flutter test
@@ -96,6 +127,20 @@ layers, persistence model, and extension path are documented in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 The initial BLE profile and validation record are in
 [`docs/BLE_PROTOCOLS.md`](docs/BLE_PROTOCOLS.md).
+
+The current Flutter app also has a local, in-memory **Logs** screen for BLE
+connection/command errors and inbound packets. Lotus E1-shaped FFF4 data may
+be displayed as a best-effort observation when a supported packet is seen; it
+is not a controller-confirmed state and must not be used as a compatibility or
+execution claim.
+
+While the app is running, protocol sessions merge accepted lighting commands
+and recognized observations into local per-device state. Group and individual
+cards share this state; group colour indicators render the known member colours
+as a gradient. The command boundary keeps a calibrated transport colour
+separate from the desired UI colour. Session state is not yet durable device
+configuration; calibration profiles and their assignments are the narrow local
+JSON-backed exception described below.
 
 Protocol references for validation and research include:
 
@@ -171,6 +216,10 @@ mutually exclusive for a given device.
 All configuration lives on the device. The planned storage layer is a structured
 local database (SQLite via Drift is the proposed option) with typed models,
 schema migrations, transactions, referential integrity, and reactive access.
+For the current, deliberately narrow per-device hue-calibration slice, the
+user selected a versioned JSON document in the local settings store instead of
+introducing SQLite. It is behind a repository and can be migrated later; see
+[`docs/COLOR_CALIBRATION.md`](docs/COLOR_CALIBRATION.md).
 
 Persisted data includes devices, capability profiles, groups and membership,
 presets, scenes, pipelines, node configurations, preferences, overrides,

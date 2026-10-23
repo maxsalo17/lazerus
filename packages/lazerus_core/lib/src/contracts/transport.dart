@@ -44,6 +44,7 @@ class TransportCapabilities {
     this.supportsPersistentConnections = false,
     this.supportsBackgroundRestoration = false,
     this.supportsIncomingMessages = false,
+    this.supportsReadRequests = false,
     this.supportsDeliveryAcknowledgements = false,
     this.maximumMessageSize,
   }) : discoveryModes = Set.unmodifiable(discoveryModes);
@@ -52,6 +53,7 @@ class TransportCapabilities {
   final bool supportsPersistentConnections;
   final bool supportsBackgroundRestoration;
   final bool supportsIncomingMessages;
+  final bool supportsReadRequests;
   final bool supportsDeliveryAcknowledgements;
   final int? maximumMessageSize;
 }
@@ -170,5 +172,10 @@ abstract interface class TransportSession {
   Stream<TransportMessage> get incomingMessages;
 
   Future<TransportReceipt> send(TransportMessage message);
+
+  /// Reads a declared protocol channel when the underlying transport supports
+  /// it. A `null` result means that the channel is unavailable or not readable.
+  /// Protocol adapters, not widgets, decide which channels are safe to read.
+  Future<TransportMessage?> read(String channel);
   Future<void> disconnect();
 }

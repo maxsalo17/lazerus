@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lazerus_core/lazerus_core.dart';
@@ -26,6 +28,22 @@ void main() {
     expect(
       LotusLampXFrameCodec.color(1, 2, 3),
       orderedEquals(<int>[0x7e, 0x07, 0x05, 0x03, 1, 2, 3, 0x10, 0xef]),
+    );
+  });
+
+  test('decodes E1-shaped inbound state only as a best-effort value', () {
+    final color = LotusLampXFrameCodec.tryDecodeE1State(
+      LotusLampXFrameCodec.color(1, 2, 3),
+    );
+    final brightness = LotusLampXFrameCodec.tryDecodeE1State(
+      LotusLampXFrameCodec.brightness(128),
+    );
+
+    expect(color!.color, RgbColor(1, 2, 3));
+    expect(brightness!.brightness, closeTo(128 / 255, 0.0001));
+    expect(
+      LotusLampXFrameCodec.tryDecodeE1State(Uint8List.fromList(<int>[0x00])),
+      isNull,
     );
   });
 
@@ -89,6 +107,34 @@ void main() {
         transport.sentMessages.single.payload,
         orderedEquals(<int>[0x7e, 0x07, 0x05, 0x03, 1, 2, 3, 0x10, 0xef]),
       );
+      expect(device.lastKnownState!.color, RgbColor(1, 2, 3));
+      await device.close();
+      await transport.dispose();
+    },
+  );
+
+  test(
+    'requests the declared FFF4 channel and emits a decoded observation',
+    () async {
+      final transport = _RecordingTransportSession()
+        ..readResponse = TransportMessage(
+          LotusLampXFrameCodec.brightness(128),
+          channel: LotusLampXBleIdentifiers.notifyCharacteristicUuid,
+        );
+      final adapter = LotusLampXProtocolAdapter();
+      final device = await adapter.openSession(
+        transport,
+        const ProtocolProbeResult(status: ProtocolProbeStatus.unverified),
+      );
+      final observation = device.observations.first;
+
+      await device.requestCurrentState();
+
+      expect(
+        transport.lastReadChannel,
+        LotusLampXBleIdentifiers.notifyCharacteristicUuid,
+      );
+      expect((await observation).state!.brightness, closeTo(128 / 255, 0.0001));
       await device.close();
       await transport.dispose();
     },
@@ -106,6 +152,8 @@ class _RecordingTransportSession implements TransportSession {
   @override
   final TransportEndpoint endpoint;
   final List<TransportMessage> sentMessages = <TransportMessage>[];
+  TransportMessage? readResponse;
+  String? lastReadChannel;
 
   @override
   Stream<TransportSessionEvent> get events =>
@@ -122,6 +170,12 @@ class _RecordingTransportSession implements TransportSession {
   Future<TransportReceipt> send(TransportMessage message) async {
     sentMessages.add(message);
     return const TransportReceipt(status: TransportDeliveryStatus.transmitted);
+  }
+
+  @override
+  Future<TransportMessage?> read(String channel) async {
+    lastReadChannel = channel;
+    return readResponse;
   }
 
   Future<void> dispose() => disconnect();

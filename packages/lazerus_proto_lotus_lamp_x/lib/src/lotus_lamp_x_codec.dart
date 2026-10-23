@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:lazerus_core/lazerus_core.dart';
+
 import 'lotus_lamp_x_identifiers.dart';
 
 /// Plain E1 frame encoder inferred from LotusLampX's BLE protocol module.
@@ -85,6 +87,30 @@ abstract final class LotusLampXFrameCodec {
       throw ArgumentError.value(value, 'value', 'Must be between 0 and 1.');
     }
     return (value * 255).round();
+  }
+
+  /// Decodes an inbound packet only when it has the same plain E1 shape as a
+  /// supported outbound command. Controller notifications are not yet a
+  /// validated state protocol, so callers must label this as best-effort.
+  static DesiredLightingState? tryDecodeE1State(Uint8List frame) {
+    if (frame.length != _frameLength ||
+        frame[0] != _frameStart ||
+        frame[8] != _frameEnd) {
+      return null;
+    }
+    if (frame[2] == LotusLampXCommand.power.value &&
+        (frame[3] == 0x00 || frame[3] == 0xff)) {
+      return DesiredLightingState(power: frame[3] == 0xff);
+    }
+    if (frame[2] == LotusLampXCommand.color.value && frame[3] == 0x03) {
+      return DesiredLightingState(
+        color: RgbColor(frame[4], frame[5], frame[6]),
+      );
+    }
+    if (frame[2] == LotusLampXCommand.brightness.value && frame[1] == 0x04) {
+      return DesiredLightingState(brightness: frame[3] / 255);
+    }
+    return null;
   }
 
   static void _requireByte(int value) {

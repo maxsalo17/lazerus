@@ -97,7 +97,16 @@ abstract interface class LightingDeviceSession {
   DeviceCapabilities get capabilities;
   Stream<DeviceObservation> get observations;
 
+  /// The partial lighting state last accepted by this protocol session or
+  /// merged from a protocol observation. It is local bookkeeping, not proof
+  /// that the controller physically applied a write.
+  DesiredLightingState? get lastKnownState;
+
   Future<CommandResult> execute(LightingCommand command);
+
+  /// Asks the protocol to obtain a current device state when it has a safe,
+  /// declared read mechanism. The result is emitted through [observations].
+  Future<void> requestCurrentState();
   Future<void> close();
 }
 
