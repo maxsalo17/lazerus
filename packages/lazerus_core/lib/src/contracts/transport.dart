@@ -11,9 +11,7 @@ class TransportEndpoint {
     this.displayName,
     Set<String> advertisedServiceIds = const <String>{},
     Map<String, String> metadata = const <String, String>{},
-  }) : advertisedServiceIds = Set.unmodifiable(
-         advertisedServiceIds.map(_normalizeIdentifier),
-       ),
+  }) : advertisedServiceIds = Set.unmodifiable(advertisedServiceIds.map(_normalizeIdentifier)),
        metadata = Map.unmodifiable(metadata);
 
   /// An identifier meaningful only to the [transport] implementation.
@@ -67,12 +65,8 @@ class DiscoveryRequest {
     Set<String> serviceIds = const <String>{},
     Set<String> namePrefixes = const <String>{},
     this.includeUnidentified = true,
-  }) : serviceIds = Set.unmodifiable(
-         serviceIds.map((serviceId) => serviceId.toLowerCase()),
-       ),
-       namePrefixes = Set.unmodifiable(
-         namePrefixes.map((prefix) => prefix.toLowerCase()),
-       );
+  }) : serviceIds = Set.unmodifiable(serviceIds.map((serviceId) => serviceId.toLowerCase())),
+       namePrefixes = Set.unmodifiable(namePrefixes.map((prefix) => prefix.toLowerCase()));
 
   final Duration timeout;
   final Set<String> serviceIds;
@@ -81,10 +75,7 @@ class DiscoveryRequest {
 }
 
 class ConnectionOptions {
-  const ConnectionOptions({
-    this.autoReconnect = false,
-    this.timeout = const Duration(seconds: 15),
-  });
+  const ConnectionOptions({this.autoReconnect = false, this.timeout = const Duration(seconds: 15)});
 
   final bool autoReconnect;
   final Duration timeout;
@@ -114,12 +105,8 @@ final class TransportDiscoveryComplete extends TransportDiscoveryEvent {
 enum TransportSessionEventType { connected, disconnected, reconnecting, error }
 
 class TransportSessionEvent {
-  TransportSessionEvent({
-    required this.type,
-    DateTime? occurredAt,
-    this.message,
-    this.error,
-  }) : occurredAt = occurredAt ?? DateTime.now().toUtc();
+  TransportSessionEvent({required this.type, DateTime? occurredAt, this.message, this.error})
+    : occurredAt = occurredAt ?? DateTime.now().toUtc();
 
   final TransportSessionEventType type;
   final DateTime occurredAt;
@@ -129,12 +116,9 @@ class TransportSessionEvent {
 
 /// A protocol message moving through a selected transport session.
 class TransportMessage {
-  TransportMessage(
-    Uint8List payload, {
-    this.channel,
-    Map<String, String> metadata = const <String, String>{},
-  }) : payload = Uint8List.fromList(payload),
-       metadata = Map.unmodifiable(metadata);
+  TransportMessage(Uint8List payload, {this.channel, Map<String, String> metadata = const <String, String>{}})
+    : payload = Uint8List.fromList(payload),
+      metadata = Map.unmodifiable(metadata);
 
   final Uint8List payload;
 
@@ -159,10 +143,7 @@ abstract interface class DeviceTransport {
   TransportCapabilities get capabilities;
 
   Stream<TransportDiscoveryEvent> discover(DiscoveryRequest request);
-  Future<TransportSession> connect(
-    TransportEndpoint endpoint,
-    ConnectionOptions options,
-  );
+  Future<TransportSession> connect(TransportEndpoint endpoint, ConnectionOptions options);
 }
 
 /// A connected, transport-level channel to a single endpoint.

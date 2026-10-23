@@ -41,3 +41,22 @@ For a calibrated colour command, the app retains:
 
 The latter two are not confirmation of a strip's physical output. See
 [`COLOR_CALIBRATION.md`](COLOR_CALIBRATION.md) for editing and preview rules.
+
+## Scene model foundation
+
+The delivered Scene foundation persists a `SceneConfiguration` root at schema
+version `1` as a local JSON value. Each `Scene` has ordered group/device
+references and ordered custom-control slots. A control binds one typed parameter
+(`power`, `brightness`, or `color`) to one or more references; its type fixes
+the parameter it may bind. The model rejects duplicate targets, slots and
+bindings, and retains an unresolved ID rather than removing a reference.
+
+The model stores IDs and user layout only; it does not snapshot group
+membership, platform BLE identifiers, raw protocol frames, current control
+values, or controller-confirmed state. Scene Settings edits this composition;
+Scene Detail resolves the references at command time into a transient,
+deduplicated device target. That runtime target and dispatch status are never
+persisted as confirmed device state.
+
+See [`SCENE_SYSTEM.md`](SCENE_SYSTEM.md) for the contract, capability rules and
+three-step implementation plan.

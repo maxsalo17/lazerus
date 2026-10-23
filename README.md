@@ -46,9 +46,17 @@ Calibration is never assigned to a group: group commands are corrected per
 member and group cards keep showing the intended member colours. Details and
 limitations are in [`docs/COLOR_CALIBRATION.md`](docs/COLOR_CALIBRATION.md).
 
-Identity bindings and custom groups are stored locally. A complete structured
-device database, relinking UI, reconnection policy, the central command
-scheduler, scenes, pipelines, and macOS menu-bar controls are still pending.
+Identity bindings, custom groups, and the Scene composition foundation are
+stored locally. Scene composition uses versioned JSON with stable group/device
+references, slotted typed control bindings, and detectable missing references.
+The **Scenes** section contains a Scene library, Settings/editor and a runtime
+detail surface for targets and custom toggle/brightness/colour controls.
+Runtime bindings resolve their current group/device members, deduplicate them,
+and recheck connection and capabilities before dispatching ordinary lighting
+commands. Unavailable bindings and command errors stay visible in the Scene
+and Logs. A complete structured device database, relinking UI, reconnection
+policy, the central command scheduler, pipelines, and macOS menu-bar controls
+are also still pending.
 
 ## Packages
 
@@ -127,6 +135,8 @@ layers, persistence model, and extension path are documented in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 The initial BLE profile and validation record are in
 [`docs/BLE_PROTOCOLS.md`](docs/BLE_PROTOCOLS.md).
+The planned Scene composition and custom-control slice is specified in
+[`docs/SCENE_SYSTEM.md`](docs/SCENE_SYSTEM.md).
 
 The current Flutter app also has a local, in-memory **Logs** screen for BLE
 connection/command errors and inbound packets. Lotus E1-shaped FFF4 data may
@@ -216,10 +226,11 @@ mutually exclusive for a given device.
 All configuration lives on the device. The planned storage layer is a structured
 local database (SQLite via Drift is the proposed option) with typed models,
 schema migrations, transactions, referential integrity, and reactive access.
-For the current, deliberately narrow per-device hue-calibration slice, the
-user selected a versioned JSON document in the local settings store instead of
-introducing SQLite. It is behind a repository and can be migrated later; see
-[`docs/COLOR_CALIBRATION.md`](docs/COLOR_CALIBRATION.md).
+For the current, deliberately narrow per-device hue-calibration and Scene
+composition slices, the user selected versioned JSON documents in the local
+settings store instead of introducing SQLite. Each is behind a repository and
+can be migrated later; see [`docs/COLOR_CALIBRATION.md`](docs/COLOR_CALIBRATION.md)
+and [`docs/SCENE_SYSTEM.md`](docs/SCENE_SYSTEM.md).
 
 Persisted data includes devices, capability profiles, groups and membership,
 presets, scenes, pipelines, node configurations, preferences, overrides,

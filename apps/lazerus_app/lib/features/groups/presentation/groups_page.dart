@@ -22,6 +22,7 @@ class GroupsPage extends ConsumerWidget {
       appBar: AppBar(title: const Text('Групи')),
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('create-group'),
+        heroTag: 'create-group',
         onPressed: () => unawaited(_createGroup(context, ref, devices)),
         icon: const Icon(Icons.add),
         label: const Text('Створити'),
@@ -31,14 +32,10 @@ class GroupsPage extends ConsumerWidget {
         children: <Widget>[
           Text('Common groups', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
-          const Text(
-            'Створюються автоматично для кожного спільного протоколу й не редагуються.',
-          ),
+          const Text('Створюються автоматично для кожного спільного протоколу й не редагуються.'),
           const SizedBox(height: 8),
           if (protocolGroups.isEmpty)
-            const _EmptyGroupSection(
-              text: 'З’являться після виявлення сумісних девайсів.',
-            )
+            const _EmptyGroupSection(text: 'З’являться після виявлення сумісних девайсів.')
           else
             ...protocolGroups.map(
               (group) => Padding(
@@ -47,22 +44,14 @@ class GroupsPage extends ConsumerWidget {
               ),
             ),
           const SizedBox(height: 20),
-          Text(
-            'Кастомні групи',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('Кастомні групи', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           if (groupsState.isLoading)
             const Center(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: CircularProgressIndicator(),
-              ),
+              child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()),
             )
           else if (customGroups.isEmpty)
-            const _EmptyGroupSection(
-              text: 'Створіть групу та додайте девайси вручну.',
-            )
+            const _EmptyGroupSection(text: 'Створіть групу та додайте девайси вручну.')
           else
             ...customGroups.map(
               (group) => Padding(
@@ -73,10 +62,7 @@ class GroupsPage extends ConsumerWidget {
           if (groupsState.error case final error? when error.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 12),
-              child: Text(
-                error,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
+              child: Text(error, style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ),
           const SizedBox(height: 72),
         ],
@@ -84,13 +70,8 @@ class GroupsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _createGroup(
-    BuildContext context,
-    WidgetRef ref,
-    List<DebugDevice> devices,
-  ) async {
-    final protocols =
-        devices.map((device) => device.protocolId).toSet().toList()..sort();
+  Future<void> _createGroup(BuildContext context, WidgetRef ref, List<DebugDevice> devices) async {
+    final protocols = devices.map((device) => device.protocolId).toSet().toList()..sort();
     final draft = await showDialog<_NewGroupDraft>(
       context: context,
       builder: (_) => _CreateGroupDialog(protocols: protocols),
@@ -105,9 +86,7 @@ class GroupsPage extends ConsumerWidget {
       return;
     }
     final target = customGroupTargets([group], devices).single;
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => GroupDetailPage(target: target)),
-    );
+    await Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => GroupDetailPage(target: target)));
   }
 }
 
@@ -129,11 +108,7 @@ class _GroupTile extends StatelessWidget {
           '${target.customGroup?.automaticallyAddsSimilarDevices == true ? ' · автододавання' : ''}',
         ),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.of(context).push<void>(
-          MaterialPageRoute<void>(
-            builder: (_) => GroupDetailPage(target: target),
-          ),
-        ),
+        onTap: () => Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => GroupDetailPage(target: target))),
       ),
     );
   }
@@ -204,38 +179,25 @@ class _CreateGroupDialogState extends State<_CreateGroupDialog> {
             title: const Text('Автоматично додавати подібні девайси'),
             subtitle: const Text('Лише для вибраного протоколу.'),
             value: _autoAdd,
-            onChanged: widget.protocols.isEmpty
-                ? null
-                : (value) => setState(() => _autoAdd = value),
+            onChanged: widget.protocols.isEmpty ? null : (value) => setState(() => _autoAdd = value),
           ),
           if (_autoAdd)
             DropdownButtonFormField<String>(
               initialValue: _protocolId,
               decoration: const InputDecoration(labelText: 'Протокол'),
               items: widget.protocols
-                  .map(
-                    (protocol) => DropdownMenuItem<String>(
-                      value: protocol,
-                      child: Text(protocolDisplayName(protocol)),
-                    ),
-                  )
+                  .map((protocol) => DropdownMenuItem<String>(value: protocol, child: Text(protocolDisplayName(protocol))))
                   .toList(growable: false),
               onChanged: (value) => setState(() => _protocolId = value),
             ),
         ],
       ),
       actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Скасувати'),
-        ),
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Скасувати')),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(
-            _NewGroupDraft(
-              name: _nameController.text,
-              autoAddProtocolId: _autoAdd ? _protocolId : null,
-            ),
-          ),
+          onPressed: () => Navigator.of(
+            context,
+          ).pop(_NewGroupDraft(name: _nameController.text, autoAddProtocolId: _autoAdd ? _protocolId : null)),
           child: const Text('Створити'),
         ),
       ],

@@ -17,9 +17,9 @@ that a supported Lotus Lamp X candidate is automatically connected, command
 delivery remains gated when the diagnostic safeguard is explicitly disabled,
 Common groups derive
 membership from protocol, custom auto-membership combines protocol and manual
-members, a hold-to-adjust popup is anchored to its control, vertical movement
-does not alter its value, and the drag is measured from the initial value. It
-also checks the Lotus red-to-violet palette and the replaceable-command ticker:
+members, a five-pixel horizontal-drag popup is anchored to its control, vertical
+movement does not alter its value, and the drag is measured from the initial
+value. It also checks the Lotus red-to-violet palette and the replaceable-command ticker:
 stale pending values are dropped while a write is in flight and the final value
 is flushed when the finger lifts. It also verifies that an E1-shaped inbound
 Lotus packet is recorded as a best-effort observed value in the local Logs
@@ -32,6 +32,17 @@ neutral-colour preservation, versioned JSON validation, profile assignment,
 copy-on-save isolation for unselected devices, temporary editor preview, and
 the command boundary: the Lotus E1 frame receives the corrected colour while
 the app's requested/group state retains the desired colour.
+
+Scene-foundation tests cover versioned composition JSON, ordered stable slots,
+typed binding validation, fresh-repository persistence, Scene CRUD, and live
+reference resolution. Scene Settings widget tests cover adding a control to an
+empty slot, changing its type and clearing it again, while application tests
+ensure a group binding is offered only when every current member supports that
+parameter. Scene runtime tests cover device-set deduplication, unavailable
+binding reporting, final-value slider dispatch, and connection/capability
+rechecks at ticker emission. The Scene Detail widget test verifies that custom
+controls precede Groups and Devices and that a multi-binding toggle sends one
+deduplicated target.
 
 The package-level contract and codec tests remain executable independently:
 

@@ -6,10 +6,8 @@ import 'dart:async';
 /// pending value. This gives sliders responsive live feedback without building
 /// an unbounded BLE command backlog.
 class ReplaceableCommandTicker<T> {
-  ReplaceableCommandTicker({
-    required Future<void> Function(T value) onEmit,
-    this.interval = const Duration(milliseconds: 100),
-  }) : _onEmit = onEmit;
+  ReplaceableCommandTicker({required Future<void> Function(T value) onEmit, this.interval = const Duration(milliseconds: 50)})
+    : _onEmit = onEmit;
 
   final Future<void> Function(T value) _onEmit;
   final Duration interval;

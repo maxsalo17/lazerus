@@ -25,9 +25,7 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
     final deviceState = ref.watch(debugDevicesProvider);
     final controller = ref.read(debugDevicesProvider.notifier);
     final devices = deviceState.sortedDevices;
-    final selectedDevices = devices
-        .where((device) => _selectedDeviceIds.contains(device.appDeviceId))
-        .toList(growable: false);
+    final selectedDevices = devices.where((device) => _selectedDeviceIds.contains(device.appDeviceId)).toList(growable: false);
 
     return Scaffold(
       appBar: AppBar(
@@ -40,24 +38,14 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
               icon: const Icon(Icons.tune),
               label: Text('Калібрувати (${selectedDevices.length})'),
             ),
-            IconButton(
-              tooltip: 'Зняти вибір',
-              onPressed: _clearSelection,
-              icon: const Icon(Icons.clear),
-            ),
+            IconButton(tooltip: 'Зняти вибір', onPressed: _clearSelection, icon: const Icon(Icons.clear)),
           ],
           IconButton(
             key: const Key('scan-devices'),
             tooltip: deviceState.isScanning ? 'Сканування триває' : 'Сканувати',
-            onPressed: deviceState.isScanning
-                ? null
-                : () => unawaited(controller.startDiscovery()),
+            onPressed: deviceState.isScanning ? null : () => unawaited(controller.startDiscovery()),
             icon: deviceState.isScanning
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.radar),
           ),
         ],
@@ -67,13 +55,8 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
         child: ListView(
           padding: const EdgeInsets.all(12),
           children: <Widget>[
-            if (deviceState.isScanning)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 10),
-                child: LinearProgressIndicator(),
-              ),
-            if (deviceState.scanError case final error? when error.isNotEmpty)
-              _DeviceError(message: error),
+            if (deviceState.isScanning) const Padding(padding: EdgeInsets.only(bottom: 10), child: LinearProgressIndicator()),
+            if (deviceState.scanError case final error? when error.isNotEmpty) _DeviceError(message: error),
             if (devices.isEmpty)
               const _NoDevices()
             else
@@ -87,8 +70,7 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
                         _selectedProtocolId == null ||
                         _selectedProtocolId == device.protocolId ||
                         _selectedDeviceIds.contains(device.appDeviceId),
-                    onSelectionChanged: (selected) =>
-                        _toggleSelection(device, selected),
+                    onSelectionChanged: (selected) => _toggleSelection(device, selected),
                   ),
                 ),
               ),
@@ -99,9 +81,7 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
   }
 
   void _toggleSelection(DebugDevice device, bool selected) {
-    if (selected &&
-        _selectedProtocolId != null &&
-        _selectedProtocolId != device.protocolId) {
+    if (selected && _selectedProtocolId != null && _selectedProtocolId != device.protocolId) {
       return;
     }
     setState(() {
@@ -132,13 +112,9 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => CalibrationPage(
-          deviceIds: selectedDevices
-              .map((device) => device.appDeviceId)
-              .toSet(),
+          deviceIds: selectedDevices.map((device) => device.appDeviceId).toSet(),
           protocolId: protocolId,
-          deviceNames: selectedDevices
-              .map((device) => device.endpoint.displayName ?? 'Без назви')
-              .toList(growable: false),
+          deviceNames: selectedDevices.map((device) => device.endpoint.displayName ?? 'Без назви').toList(growable: false),
         ),
       ),
     );
@@ -175,22 +151,20 @@ class _CompactDeviceTile extends ConsumerWidget {
               Checkbox(
                 key: Key('select-device-${device.appDeviceId}'),
                 value: selected,
-                onChanged: selectionEnabled
-                    ? (value) => onSelectionChanged(value ?? false)
-                    : null,
+                onChanged: selectionEnabled ? (value) => onSelectionChanged(value ?? false) : null,
               ),
-              Icon(
-                deviceStatusIcon(device.status),
-                color: deviceStatusColor(context, device.status),
-                size: 20,
-              ),
+              Icon(deviceStatusIcon(device.status), color: deviceStatusColor(context, device.status), size: 20),
             ],
           ),
         ),
-        title: Text(device.endpoint.displayName ?? 'Без назви'),
+        title: Text([device.endpoint.displayName?.trim() ?? 'Unknown', device.appDeviceId.split('-').lastOrNull].join(' · ')),
         subtitle: Text(
-          '${protocolDisplayName(device.protocolId)} · ${deviceStatusLabel(device.status)}'
-          '${device.endpoint.metadata['rssi'] == null ? '' : ' · ${device.endpoint.metadata['rssi']} dBm'}',
+          [
+            protocolDisplayName(device.protocolId),
+            deviceStatusLabel(device.status),
+            device.appDeviceId,
+            if (device.endpoint.metadata['rssi'] != null) '${device.endpoint.metadata['rssi']} dBm',
+          ].join(' · '),
         ),
         onTap: () => Navigator.of(context).push<void>(
           MaterialPageRoute<void>(
@@ -206,17 +180,11 @@ class _CompactDeviceTile extends ConsumerWidget {
           ),
         ),
         trailing: connecting
-            ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
+            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
             : TextButton(
                 onPressed: connected
                     ? () => unawaited(controller.disconnect(device.appDeviceId))
-                    : () => unawaited(
-                        controller.connectDevice(device.appDeviceId),
-                      ),
+                    : () => unawaited(controller.connectDevice(device.appDeviceId)),
                 child: Text(connected ? 'Від’єднати' : 'Підключити'),
               ),
       ),

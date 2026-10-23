@@ -4,7 +4,7 @@ import 'package:lazerus_app/features/control/presentation/hold_value_control.dar
 
 void main() {
   testWidgets(
-    'anchors the rounded popup to its control and adjusts from the start value',
+    'activates after a five-pixel horizontal drag and adjusts from the start value',
     (tester) async {
       final previews = <double>[];
       double? committed;
@@ -29,7 +29,15 @@ void main() {
       final gesture = await tester.startGesture(
         tester.getCenter(find.byKey(controlKey)),
       );
-      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+
+      expect(find.byKey(const Key('hold-value-popup')), findsNothing);
+      await gesture.moveBy(const Offset(4, 0));
+      await tester.pump();
+      expect(find.byKey(const Key('hold-value-popup')), findsNothing);
+
+      await gesture.moveBy(const Offset(1, 0));
+      await tester.pump();
 
       final controlRect = tester.getRect(find.byKey(controlKey));
       final popupRect = tester.getRect(
@@ -56,6 +64,54 @@ void main() {
 
       expect(committed, closeTo(0.5 + 80 / 240, 0.01));
       expect(find.byKey(const Key('hold-value-popup')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'finishes an active drag when a preview rebuild marks the control disabled',
+    (tester) async {
+      final previews = <double>[];
+      double? committed;
+      var enabled = true;
+      const controlKey = Key('rebuilding-hold-control');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => Center(
+                child: HoldValueControl(
+                  key: controlKey,
+                  kind: HoldValueKind.brightness,
+                  value: 0.5,
+                  label: '50%',
+                  enabled: enabled,
+                  onPreview: (value) {
+                    previews.add(value);
+                    setState(() => enabled = false);
+                  },
+                  onCommit: (value) => committed = value,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(controlKey)),
+      );
+      await tester.pump();
+      await gesture.moveBy(const Offset(5, 0));
+      await tester.pump();
+      await gesture.moveBy(const Offset(80, 0));
+      await tester.pump();
+      expect(previews, hasLength(1));
+
+      await gesture.up();
+      await tester.pump();
+
+      expect(committed, closeTo(0.5 + 80 / 240, 0.01));
     },
   );
 }

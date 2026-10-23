@@ -8,6 +8,7 @@ import '../../debug/application/debug_devices_controller.dart';
 import '../../diagnostics/presentation/logs_page.dart';
 import '../../devices/presentation/devices_page.dart';
 import '../../groups/presentation/groups_page.dart';
+import '../../scenes/presentation/scenes_page.dart';
 
 class LazerusHomePage extends ConsumerStatefulWidget {
   const LazerusHomePage({super.key});
@@ -34,6 +35,7 @@ class _LazerusHomePageState extends ConsumerState<LazerusHomePage> {
       DevicesPage(),
       GroupsPage(),
       ControlsPage(),
+      ScenesPage(),
       LogsPage(),
     ];
     final destinations = const <NavigationDestination>[
@@ -48,6 +50,10 @@ class _LazerusHomePageState extends ConsumerState<LazerusHomePage> {
       NavigationDestination(
         icon: Icon(Icons.tune_outlined),
         label: 'Керування',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.auto_awesome_motion_outlined),
+        label: 'Scenes',
       ),
       NavigationDestination(
         icon: Icon(Icons.receipt_long_outlined),
@@ -101,6 +107,11 @@ class _LazerusHomePageState extends ConsumerState<LazerusHomePage> {
                       icon: Icon(Icons.tune_outlined),
                       selectedIcon: Icon(Icons.tune),
                       label: Text('Керування'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.auto_awesome_motion_outlined),
+                      selectedIcon: Icon(Icons.auto_awesome_motion),
+                      label: Text('Scenes'),
                     ),
                     NavigationRailDestination(
                       icon: Icon(Icons.receipt_long_outlined),

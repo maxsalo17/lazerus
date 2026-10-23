@@ -23,6 +23,7 @@ class CompactControlCard extends ConsumerStatefulWidget {
 class _CompactControlCardState extends ConsumerState<CompactControlCard> {
   double? _previewBrightness;
   RgbColor? _previewColor;
+  var _suppressCardOpen = false;
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +51,15 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: widget.onOpen,
+        onTap: widget.onOpen == null
+            ? null
+            : () {
+                if (_suppressCardOpen) {
+                  _suppressCardOpen = false;
+                  return;
+                }
+                widget.onOpen!.call();
+              },
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
@@ -65,6 +74,8 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                       color: target.isGroup ? null : colorFromRgb(color),
                       gradient: target.isGroup
                           ? LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
                               colors: swatchColors
                                   .map(colorFromRgb)
                                   .toList(growable: false),
@@ -112,6 +123,8 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                     label: 'Колір',
                     brightnessColor: colorFromRgb(color),
                     enabled: isEnabled,
+                    onInteractionStart: _suppressOpenForDrag,
+                    onInteractionEnd: _clearDragOpenSuppression,
                     onPreview: (value) {
                       final selected = lotusHueColor(value);
                       setState(() => _previewColor = selected);
@@ -137,6 +150,8 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                     label: '${(brightness * 100).round()}%',
                     brightnessColor: colorFromRgb(color),
                     enabled: isEnabled,
+                    onInteractionStart: _suppressOpenForDrag,
+                    onInteractionEnd: _clearDragOpenSuppression,
                     onPreview: (value) {
                       setState(() => _previewBrightness = value);
                       controls.queueReplaceable(target, SetBrightness(value));
@@ -167,6 +182,21 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
     await ref
         .read(lightingControlsProvider.notifier)
         .dispatch(widget.target, command);
+  }
+
+  void _suppressOpenForDrag() {
+    _suppressCardOpen = true;
+  }
+
+  void _clearDragOpenSuppression() {
+    // InkWell's tap callback for the same pointer is delivered after the
+    // Listener receives pointer-up. Clear on the next event turn so it is
+    // suppressed, but a later ordinary card tap still opens details.
+    scheduleMicrotask(() {
+      if (mounted) {
+        _suppressCardOpen = false;
+      }
+    });
   }
 
   static String _deviceConnectionText(DebugDevice? device) {
