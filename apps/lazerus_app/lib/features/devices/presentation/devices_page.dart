@@ -136,7 +136,7 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
               .toSet(),
           protocolId: protocolId,
           deviceNames: selectedDevices
-              .map((device) => device.endpoint.displayName ?? 'Без назви')
+              .map((device) => device.displayName)
               .toList(growable: false),
         ),
       ),
@@ -188,7 +188,7 @@ class _CompactDeviceTile extends ConsumerWidget {
         ),
         title: Text(
           [
-            device.endpoint.displayName?.trim() ?? 'Unknown',
+            device.displayName,
             device.appDeviceId.split('-').lastOrNull,
           ].join(' · '),
         ),

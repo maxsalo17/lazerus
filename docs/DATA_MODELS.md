@@ -4,6 +4,9 @@
 
 Each discovered controller has an application-generated device ID. Platform BLE
 identifiers are mutable endpoint locators, not the persisted primary identity.
+The local device-identity binding also keeps an optional user-defined name.
+That label is distinct from the controller's advertised Bluetooth name, survives
+rediscovery, and never changes its application ID or BLE binding.
 The app keeps these categories distinct:
 
 - **desired state** — the colour, brightness and power requested by a device
@@ -47,8 +50,9 @@ exception to the planned database and is isolated behind
 
 `MacroGraph` is a separate, versioned JSON schema. It stores immutable graph
 nodes, typed port identity, edges, direct-device target bindings, node
-parameters and editor positions. Parameter maps contain only recursively frozen
-JSON values.
+parameters, editor positions and `resetOnStop`. Parameter maps contain only
+recursively frozen JSON values. `resetOnStop` defaults to `true` when absent so
+legacy macro files retain their prior restoration behavior.
 
 The initial port vocabulary is:
 

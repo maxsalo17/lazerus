@@ -515,7 +515,8 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
             _bodyHeightFor(node) +
             _padding +
             ((port.direction == MacroPortDirection.input ? input++ : output++) * _portHeight) +
-            _portHeight / 2;
+            (_portHeight / 2) -
+            8;
         result[port.id] = Offset(port.direction == MacroPortDirection.input ? position.dx : position.dx + size.width, y);
       }
     }

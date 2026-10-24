@@ -59,6 +59,17 @@ void main() {
       expect(restored.nodes.single.parameters, <String, Object?>{'gain': 0.5});
       expect(restored.targetBindings.single.targetId, 'device-1');
       expect(restored.editorPositions['node-1']?.x, 12);
+      expect(restored.resetOnStop, isTrue);
+    });
+
+    test('persists reset-on-stop and keeps legacy documents restorative', () {
+      final resetDisabled = _validGraph().copyWith(resetOnStop: false);
+      final restoredDisabled = MacroGraph.fromJson(resetDisabled.toJson());
+      expect(restoredDisabled.resetOnStop, isFalse);
+
+      final legacy = _validGraph().toJson()..remove('resetOnStop');
+      final restoredLegacy = MacroGraph.fromJson(legacy);
+      expect(restoredLegacy.resetOnStop, isTrue);
     });
 
     test('rejects future schema versions', () {

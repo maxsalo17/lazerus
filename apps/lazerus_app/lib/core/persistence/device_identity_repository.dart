@@ -10,10 +10,25 @@ import 'package:uuid/uuid.dart';
 /// A BLE identifier is retained only as a discovery/relink binding. The
 /// returned application-generated UUID identifies persisted device data.
 abstract interface class DeviceIdentityRepository {
-  Future<String> resolve(
+  Future<SavedDeviceIdentity> resolve(
     TransportEndpoint endpoint, {
     required String protocolId,
   });
+
+  /// Persists a user-assigned label without changing the transport locator or
+  /// the application device ID.
+  Future<void> rename(String appDeviceId, String userDefinedName);
+}
+
+/// The locally persisted identity and optional user-facing device label.
+///
+/// [appDeviceId] is stable across rediscovery while the endpoint ID and the
+/// advertised Bluetooth name remain mutable transport data.
+class SavedDeviceIdentity {
+  const SavedDeviceIdentity({required this.appDeviceId, this.userDefinedName});
+
+  final String appDeviceId;
+  final String? userDefinedName;
 }
 
 class SharedPreferencesDeviceIdentityRepository
@@ -26,12 +41,12 @@ class SharedPreferencesDeviceIdentityRepository
   final Uuid _uuid;
   final Map<String, _DeviceIdentityBinding> _bindings =
       <String, _DeviceIdentityBinding>{};
-  final Map<String, Future<String>> _pendingResolutions =
-      <String, Future<String>>{};
+  final Map<String, Future<SavedDeviceIdentity>> _pendingResolutions =
+      <String, Future<SavedDeviceIdentity>>{};
   Future<void>? _loadOperation;
 
   @override
-  Future<String> resolve(
+  Future<SavedDeviceIdentity> resolve(
     TransportEndpoint endpoint, {
     required String protocolId,
   }) {
@@ -49,7 +64,7 @@ class SharedPreferencesDeviceIdentityRepository
     return operation.whenComplete(() => _pendingResolutions.remove(bindingKey));
   }
 
-  Future<String> _resolve(
+  Future<SavedDeviceIdentity> _resolve(
     TransportEndpoint endpoint, {
     required String protocolId,
     required String bindingKey,
@@ -62,10 +77,40 @@ class SharedPreferencesDeviceIdentityRepository
       endpointId: endpoint.id,
       protocolId: protocolId,
       displayName: endpoint.displayName,
+      userDefinedName: existing?.userDefinedName,
     );
     _bindings[bindingKey] = binding;
     await _save();
-    return binding.appDeviceId;
+    return SavedDeviceIdentity(
+      appDeviceId: binding.appDeviceId,
+      userDefinedName: binding.userDefinedName,
+    );
+  }
+
+  @override
+  Future<void> rename(String appDeviceId, String userDefinedName) async {
+    await _ensureLoaded();
+    final normalizedName = userDefinedName.trim();
+    if (normalizedName.isEmpty) {
+      throw ArgumentError.value(
+        userDefinedName,
+        'userDefinedName',
+        'A device name cannot be empty.',
+      );
+    }
+    final keys = _bindings.entries
+        .where((entry) => entry.value.appDeviceId == appDeviceId)
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    if (keys.isEmpty) {
+      throw StateError('The device is not known locally.');
+    }
+    for (final key in keys) {
+      _bindings[key] = _bindings[key]!.copyWith(
+        userDefinedName: normalizedName,
+      );
+    }
+    await _save();
   }
 
   Future<void> _ensureLoaded() {
@@ -113,6 +158,7 @@ class _DeviceIdentityBinding {
     required this.endpointId,
     required this.protocolId,
     required this.displayName,
+    this.userDefinedName,
   });
 
   final String appDeviceId;
@@ -120,6 +166,18 @@ class _DeviceIdentityBinding {
   final String endpointId;
   final String protocolId;
   final String? displayName;
+  final String? userDefinedName;
+
+  _DeviceIdentityBinding copyWith({String? userDefinedName}) {
+    return _DeviceIdentityBinding(
+      appDeviceId: appDeviceId,
+      transport: transport,
+      endpointId: endpointId,
+      protocolId: protocolId,
+      displayName: displayName,
+      userDefinedName: userDefinedName ?? this.userDefinedName,
+    );
+  }
 
   Map<String, Object?> toJson() => <String, Object?>{
     'appDeviceId': appDeviceId,
@@ -127,6 +185,7 @@ class _DeviceIdentityBinding {
     'endpointId': endpointId,
     'protocolId': protocolId,
     'displayName': displayName,
+    'userDefinedName': userDefinedName,
   };
 
   static _DeviceIdentityBinding? fromJson(Map<String, Object?> json) {
@@ -152,23 +211,57 @@ class _DeviceIdentityBinding {
       endpointId: endpointId,
       protocolId: protocolId,
       displayName: json['displayName'] as String?,
+      userDefinedName: json['userDefinedName'] as String?,
     );
   }
 }
 
 /// Lightweight deterministic repository for controller and UI tests.
 class InMemoryDeviceIdentityRepository implements DeviceIdentityRepository {
-  final Map<String, String> _identities = <String, String>{};
+  final Map<String, _InMemoryIdentity> _identities =
+      <String, _InMemoryIdentity>{};
   final Uuid _uuid = const Uuid();
 
   @override
-  Future<String> resolve(
+  Future<SavedDeviceIdentity> resolve(
     TransportEndpoint endpoint, {
     required String protocolId,
   }) async {
-    return _identities.putIfAbsent(
+    final identity = _identities.putIfAbsent(
       '${endpoint.transport.name}:${endpoint.id}',
-      _uuid.v4,
+      () => _InMemoryIdentity(appDeviceId: _uuid.v4()),
+    );
+    return SavedDeviceIdentity(
+      appDeviceId: identity.appDeviceId,
+      userDefinedName: identity.userDefinedName,
     );
   }
+
+  @override
+  Future<void> rename(String appDeviceId, String userDefinedName) async {
+    final normalizedName = userDefinedName.trim();
+    if (normalizedName.isEmpty) {
+      throw ArgumentError.value(
+        userDefinedName,
+        'userDefinedName',
+        'A device name cannot be empty.',
+      );
+    }
+    final identities = _identities.values.where(
+      (identity) => identity.appDeviceId == appDeviceId,
+    );
+    if (identities.isEmpty) {
+      throw StateError('The device is not known locally.');
+    }
+    for (final identity in identities) {
+      identity.userDefinedName = normalizedName;
+    }
+  }
+}
+
+class _InMemoryIdentity {
+  _InMemoryIdentity({required this.appDeviceId});
+
+  final String appDeviceId;
+  String? userDefinedName;
 }

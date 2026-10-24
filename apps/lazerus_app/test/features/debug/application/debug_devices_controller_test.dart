@@ -79,6 +79,32 @@ void main() {
   );
 
   test(
+    'renames a discovered device without changing its application ID',
+    () async {
+      await controller.startDiscovery();
+      transport.discoveries.add(
+        TransportEndpointDiscovered(
+          TransportEndpoint(
+            id: 'peripheral-1',
+            transport: TransportKind.ble,
+            displayName: 'ELK test strip',
+          ),
+        ),
+      );
+      await _settle();
+
+      await controller.renameDevice('peripheral-1', '  Кухонна стрічка  ');
+
+      final device = container
+          .read(debugDevicesProvider)
+          .devices['peripheral-1']!;
+      expect(device.appDeviceId, 'peripheral-1');
+      expect(device.userDefinedName, 'Кухонна стрічка');
+      expect(device.displayName, 'Кухонна стрічка');
+    },
+  );
+
+  test(
     'gates inferred control frames until diagnostic mode is enabled',
     () async {
       await controller.startDiscovery();
@@ -302,12 +328,15 @@ class _EndpointIdentityRepository implements DeviceIdentityRepository {
   const _EndpointIdentityRepository();
 
   @override
-  Future<String> resolve(
+  Future<SavedDeviceIdentity> resolve(
     TransportEndpoint endpoint, {
     required String protocolId,
   }) async {
-    return endpoint.id;
+    return SavedDeviceIdentity(appDeviceId: endpoint.id);
   }
+
+  @override
+  Future<void> rename(String appDeviceId, String userDefinedName) async {}
 }
 
 class _FakeTransportSession implements TransportSession {

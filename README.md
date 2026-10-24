@@ -55,8 +55,9 @@ best-effort observed state.
 Macros are versioned, local JSON documents containing a typed directed graph,
 node settings, direct-device target bindings and editor layout. The graph is
 validated before run, is editable while running, and can be saved with
-**Cmd+S**. Stopping a macro performs a best-effort restoration of each device
-state it changed.
+**Cmd+S**. **Reset on stop** is enabled by default and performs a best-effort
+restoration of each device state the Macro changed; disabling it leaves the
+last accepted Macro state active.
 
 The current module library contains:
 

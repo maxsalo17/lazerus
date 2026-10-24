@@ -13,6 +13,7 @@ final class MacroGraph {
     required Iterable<MacroEdge> edges,
     Iterable<MacroTargetBinding> targetBindings = const <MacroTargetBinding>[],
     this.schemaVersion = currentMacroGraphSchemaVersion,
+    this.resetOnStop = true,
     Map<String, MacroEditorPosition> editorPositions =
         const <String, MacroEditorPosition>{},
   }) : nodes = List<MacroNode>.unmodifiable(nodes),
@@ -44,6 +45,12 @@ final class MacroGraph {
   final String id;
   final String name;
   final int schemaVersion;
+
+  /// Restores device state captured before the Macro started when it stops.
+  ///
+  /// This defaults to true so existing Macro JSON retains its original
+  /// restoration behaviour when the optional persisted field is absent.
+  final bool resetOnStop;
   final List<MacroNode> nodes;
   final List<MacroEdge> edges;
   final List<MacroTargetBinding> targetBindings;
@@ -57,6 +64,7 @@ final class MacroGraph {
     String? id,
     String? name,
     int? schemaVersion,
+    bool? resetOnStop,
     Iterable<MacroNode>? nodes,
     Iterable<MacroEdge>? edges,
     Iterable<MacroTargetBinding>? targetBindings,
@@ -65,6 +73,7 @@ final class MacroGraph {
     id: id ?? this.id,
     name: name ?? this.name,
     schemaVersion: schemaVersion ?? this.schemaVersion,
+    resetOnStop: resetOnStop ?? this.resetOnStop,
     nodes: nodes ?? this.nodes,
     edges: edges ?? this.edges,
     targetBindings: targetBindings ?? this.targetBindings,
@@ -75,6 +84,7 @@ final class MacroGraph {
     'schemaVersion': schemaVersion,
     'id': id,
     'name': name,
+    'resetOnStop': resetOnStop,
     'nodes': nodes.map((node) => node.toJson()).toList(growable: false),
     'edges': edges.map((edge) => edge.toJson()).toList(growable: false),
     'targetBindings': targetBindings
@@ -97,6 +107,7 @@ final class MacroGraph {
       schemaVersion: schemaVersion,
       id: _requiredString(json, 'id'),
       name: _requiredString(json, 'name'),
+      resetOnStop: _optionalBool(json, 'resetOnStop', defaultValue: true),
       nodes: _requiredMapList(json, 'nodes').map(MacroNode.fromJson),
       edges: _requiredMapList(json, 'edges').map(MacroEdge.fromJson),
       targetBindings: _optionalMapList(

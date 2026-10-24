@@ -23,7 +23,10 @@ inferred behavior and is not a compatibility promise for every controller or
 firmware. A displayed `transmitted` or `acknowledged` result means only that
 the BLE transport accepted the write; it is not evidence that the light changed.
 
-Custom groups and local app-device identities are stored on-device. A Common
+Custom groups, local app-device identities, and user-defined device names are
+stored on-device. A user-defined name is separate from the controller's
+advertised BLE name, so it survives rediscovery without changing the transport
+binding. A Common
 group is derived for each discovered protocol family, cannot be edited, and
 always includes all matching devices. A custom group can keep explicit members
 and optionally include newly discovered devices with one chosen protocol.

@@ -21,6 +21,7 @@ class DeviceDetailPage extends ConsumerStatefulWidget {
 
 class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
   double? _previewBrightness;
+  var _isRenaming = false;
 
   @override
   Widget build(BuildContext context) {
@@ -29,10 +30,28 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
     final controlState = controls.stateFor(widget.appDeviceId);
     final brightness = _previewBrightness ?? controlState.brightness;
     final connected = device?.status == DebugDeviceConnectionStatus.connected;
-    final name = device?.endpoint.displayName ?? 'Девайс';
+    final name = device?.displayName ?? 'Девайс';
 
     return Scaffold(
-      appBar: AppBar(title: Text(name)),
+      appBar: AppBar(
+        title: Text(name),
+        actions: <Widget>[
+          IconButton(
+            key: const Key('rename-device'),
+            tooltip: 'Перейменувати девайс',
+            onPressed: device == null || _isRenaming
+                ? null
+                : () => unawaited(_renameDevice(device)),
+            icon: _isRenaming
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.edit_outlined),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
@@ -120,9 +139,122 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
         .dispatch(widget.appDeviceId, command);
   }
 
+  Future<void> _renameDevice(DebugDevice device) async {
+    final name = await _promptForDeviceName(
+      device.userDefinedName ?? device.displayName,
+    );
+    if (name == null || !mounted) {
+      return;
+    }
+
+    setState(() => _isRenaming = true);
+    try {
+      await ref
+          .read(debugDevicesProvider.notifier)
+          .renameDevice(widget.appDeviceId, name);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Назву девайса збережено.')));
+    } on Object {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не вдалося зберегти назву девайса.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isRenaming = false);
+      }
+    }
+  }
+
+  Future<String?> _promptForDeviceName(String initialName) async {
+    return showDialog<String>(
+      context: context,
+      builder: (_) => _RenameDeviceDialog(initialName: initialName),
+    );
+  }
+
   static String _deviceStatus(DebugDevice? device) {
     if (device == null) return 'Девайс недоступний';
     return deviceStatusLabel(device.status);
+  }
+}
+
+class _RenameDeviceDialog extends StatefulWidget {
+  const _RenameDeviceDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_RenameDeviceDialog> createState() => _RenameDeviceDialogState();
+}
+
+class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialName,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Перейменувати девайс'),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          key: const Key('device-name-field'),
+          controller: _controller,
+          autofocus: true,
+          maxLength: 64,
+          textInputAction: TextInputAction.done,
+          decoration: const InputDecoration(
+            labelText: 'Назва девайса',
+            helperText: 'Зберігається лише на цьому пристрої.',
+          ),
+          validator: _validateDeviceName,
+          onFieldSubmitted: (_) => _submit(),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Скасувати'),
+        ),
+        FilledButton(
+          key: const Key('save-device-name'),
+          onPressed: _submit,
+          child: const Text('Зберегти'),
+        ),
+      ],
+    );
+  }
+
+  String? _validateDeviceName(String? value) {
+    final name = value?.trim() ?? '';
+    if (name.isEmpty) {
+      return 'Введіть назву девайса.';
+    }
+    if (name.length > 64) {
+      return 'Назва має містити до 64 символів.';
+    }
+    return null;
+  }
+
+  void _submit() {
+    if (_formKey.currentState!.validate()) {
+      Navigator.of(context).pop(_controller.text.trim());
+    }
   }
 }
 

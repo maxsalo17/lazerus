@@ -142,9 +142,12 @@ last valid runtime operating and appear in diagnostics. **Save** or **Cmd+S**
 persists the current graph.
 
 A target input takes priority over the matching manual control while it is
-connected and values are arriving. On stop, the delivery bridge stops source
-events, lets an accepted write settle, then sends a best-effort restore of the
-pre-macro desired state only for devices actually changed by that macro.
+connected and values are arriving. Each Macro has a persisted **Reset on stop**
+setting, enabled by default for compatibility with existing Macro files. When
+enabled, stop first ends source events and lets an accepted write settle, then
+sends a best-effort restore of the pre-macro desired state only for devices
+actually changed by that Macro. When disabled, its last accepted state remains
+active after stop.
 
 Reactive output is deliberately best effort. The bridge permits exactly one
 pending or in-flight write for a device. Values arriving while that write is

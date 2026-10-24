@@ -70,6 +70,7 @@ class DebugDevice {
     this.observedAt,
     this.transportState,
     this.localState,
+    this.userDefinedName,
   });
 
   /// Stable local identity used by persisted configuration and macro targets.
@@ -102,6 +103,23 @@ class DebugDevice {
   /// by accepted app commands, not treated as physical confirmation.
   final DesiredLightingState? localState;
 
+  /// A locally persisted label chosen by the user. This is intentionally
+  /// separate from [TransportEndpoint.displayName], which is BLE advertising
+  /// data and may change when a controller is rediscovered.
+  final String? userDefinedName;
+
+  String get displayName {
+    final customName = userDefinedName?.trim();
+    if (customName != null && customName.isNotEmpty) {
+      return customName;
+    }
+    final advertisedName = endpoint.displayName?.trim();
+    if (advertisedName != null && advertisedName.isNotEmpty) {
+      return advertisedName;
+    }
+    return appDeviceId;
+  }
+
   /// Locally tracked state for rendering. It is never a
   /// claim that a write changed the physical strip.
   DesiredLightingState get lastKnownState =>
@@ -130,6 +148,7 @@ class DebugDevice {
     DateTime? observedAt,
     DesiredLightingState? transportState,
     DesiredLightingState? localState,
+    String? userDefinedName,
   }) {
     return DebugDevice(
       appDeviceId: appDeviceId ?? this.appDeviceId,
@@ -149,6 +168,7 @@ class DebugDevice {
       observedAt: observedAt ?? this.observedAt,
       transportState: transportState ?? this.transportState,
       localState: localState ?? this.localState,
+      userDefinedName: userDefinedName ?? this.userDefinedName,
     );
   }
 }
@@ -169,9 +189,7 @@ class DebugModuleState {
   List<DebugDevice> get sortedDevices {
     final devices = this.devices.values.toList()
       ..sort((left, right) {
-        final leftName = left.endpoint.displayName ?? left.endpoint.id;
-        final rightName = right.endpoint.displayName ?? right.endpoint.id;
-        return leftName.compareTo(rightName);
+        return left.displayName.compareTo(right.displayName);
       });
     return List<DebugDevice>.unmodifiable(devices);
   }
@@ -501,6 +519,34 @@ class DebugDevicesController extends Notifier<DebugModuleState> {
     );
   }
 
+  /// Stores a user-facing name separately from BLE advertising data.
+  Future<void> renameDevice(String appDeviceId, String userDefinedName) async {
+    final device = state.devices[appDeviceId];
+    if (_disposed || device == null) {
+      throw StateError('The device is no longer listed.');
+    }
+    final normalizedName = userDefinedName.trim();
+    if (normalizedName.isEmpty) {
+      throw ArgumentError.value(
+        userDefinedName,
+        'userDefinedName',
+        'A device name cannot be empty.',
+      );
+    }
+
+    await _deviceIdentityRepository.rename(appDeviceId, normalizedName);
+    if (_disposed) {
+      return;
+    }
+    final current = state.devices[appDeviceId];
+    if (current != null) {
+      _updateDevice(
+        appDeviceId,
+        current.copyWith(userDefinedName: normalizedName),
+      );
+    }
+  }
+
   DiscoveryRequest _discoveryRequest() {
     final serviceIds = <String>{};
     final namePrefixes = <String>{};
@@ -564,13 +610,14 @@ class DebugDevicesController extends Notifier<DebugModuleState> {
     }
 
     try {
-      final appDeviceId = await _deviceIdentityRepository.resolve(
+      final identity = await _deviceIdentityRepository.resolve(
         endpoint,
         protocolId: candidate.adapter.id,
       );
       if (_disposed) {
         return;
       }
+      final appDeviceId = identity.appDeviceId;
       final current = state.devices[appDeviceId];
       final device = DebugDevice(
         appDeviceId: appDeviceId,
@@ -590,6 +637,7 @@ class DebugDevicesController extends Notifier<DebugModuleState> {
         observedAt: current?.observedAt,
         transportState: current?.transportState,
         localState: current?.localState,
+        userDefinedName: current?.userDefinedName ?? identity.userDefinedName,
       );
       _updateDevice(appDeviceId, device);
 
@@ -874,7 +922,7 @@ class DebugDevicesController extends Notifier<DebugModuleState> {
   }
 
   String? _deviceName(String appDeviceId) {
-    return state.devices[appDeviceId]?.endpoint.displayName;
+    return state.devices[appDeviceId]?.displayName;
   }
 
   void _handleTransportEvent(String appDeviceId, TransportSessionEvent event) {

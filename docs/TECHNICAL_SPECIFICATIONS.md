@@ -26,7 +26,9 @@ scope:
   brightness controls are available on an individual device's detail page.
 - **Macros are the multi-device automation model.** A typed macro graph wires
   triggers/modifiers directly to individual device input nodes. A macro has no
-  indirect target kind and no dependency on a scene or group.
+  indirect target kind and no dependency on a scene or group. Its persisted
+  `resetOnStop` policy controls whether it restores states captured before the
+  Macro began.
 
 Accordingly, every requirement below that prescribes a Group, Scene or separate
 Control feature is retained as historical context only and is not active

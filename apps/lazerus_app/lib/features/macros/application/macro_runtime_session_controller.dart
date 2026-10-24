@@ -379,6 +379,7 @@ final class MacroRuntimeSessionController
     final candidate = _ActiveMacroRuntimeSession(
       runtime: runtime,
       bridge: bridge,
+      resetOnStop: definition.resetOnStop,
       binding: binding,
       deliverySubscription: bridge.statuses.listen(
         (delivery) => _onDelivery(macroId, delivery),
@@ -492,9 +493,9 @@ final class MacroRuntimeSessionController
   }
 
   /// Stops and releases one active runtime. Calling this for an already stopped
-  /// macro is safe and leaves an explicit stopped diagnostic state. Before
-  /// releasing the session it restores the locally tracked state from before
-  /// the macro's first write, for devices this macro actually changed.
+  /// macro is safe and leaves an explicit stopped diagnostic state. A Macro
+  /// restores its pre-run state only when its persisted reset-on-stop setting
+  /// is enabled.
   Future<void> stop(String macroId) async {
     // Invalidates a possibly in-flight live replacement before it can put a
     // candidate runtime back into [_active] after this method restores state.
@@ -713,6 +714,7 @@ final class _ActiveMacroRuntimeSession {
   const _ActiveMacroRuntimeSession({
     required this.runtime,
     required this.bridge,
+    required this.resetOnStop,
     required this.binding,
     required this.deliverySubscription,
     required this.telemetrySubscription,
@@ -720,17 +722,21 @@ final class _ActiveMacroRuntimeSession {
 
   final MacroRuntime runtime;
   final MacroLightingDeliveryBridge bridge;
+  final bool resetOnStop;
   final MacroRuntimeLightingBinding binding;
   final StreamSubscription<MacroLightingDeliveryStatus> deliverySubscription;
   final StreamSubscription<TriggerEvent> telemetrySubscription;
 
-  /// Stops event production, lets an already accepted macro write settle, and
-  /// restores the captured pre-macro desired state before closing the bridge.
+  /// Stops event production and lets an already accepted macro write settle.
+  /// When configured, it then restores the captured pre-macro desired state
+  /// before closing the bridge.
   Future<void> stopAndRestore() async {
     await binding.close();
     await runtime.dispose();
     await bridge.drain();
-    await bridge.restoreChangedDeviceStates();
+    if (resetOnStop) {
+      await bridge.restoreChangedDeviceStates();
+    }
     await _closeObserversAndBridge();
   }
 
