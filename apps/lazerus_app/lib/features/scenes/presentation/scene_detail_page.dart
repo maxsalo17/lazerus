@@ -15,15 +15,18 @@ import '../../groups/application/group_targets.dart';
 import '../application/scene_controls_controller.dart';
 import '../application/scenes_controller.dart';
 import '../domain/lighting_scene.dart';
+import 'scene_macro_references.dart';
 import 'scene_settings_page.dart';
 
 /// Runtime surface for one persisted Scene. It renders no direct BLE code: the
 /// custom cards issue typed requests to [SceneControlsController], while the
 /// ordinary group/device cards keep using their existing control flow.
 class SceneDetailPage extends ConsumerStatefulWidget {
-  const SceneDetailPage({super.key, required this.sceneId});
+  const SceneDetailPage({super.key, required this.sceneId, this.macroReferencesEditor, this.macroReferenceResolver});
 
   final String sceneId;
+  final SceneMacroReferencesEditor? macroReferencesEditor;
+  final SceneMacroReferenceResolver? macroReferenceResolver;
 
   @override
   ConsumerState<SceneDetailPage> createState() => _SceneDetailPageState();
@@ -59,26 +62,15 @@ class _SceneDetailPageState extends ConsumerState<SceneDetailPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (scene == null) {
-      return const Scaffold(
-        body: Center(child: Text('Scene більше не існує.')),
-      );
+      return const Scaffold(body: Center(child: Text('Scene більше не існує.')));
     }
 
     final resolutions = ref.read(scenesProvider.notifier).resolveTargets(scene);
-    final groups = resolutions
-        .where(
-          (resolution) => resolution.reference.type == SceneTargetType.group,
-        )
-        .toList(growable: false);
+    final groups = resolutions.where((resolution) => resolution.reference.type == SceneTargetType.group).toList(growable: false);
     final devices = resolutions
-        .where(
-          (resolution) => resolution.reference.type == SceneTargetType.device,
-        )
+        .where((resolution) => resolution.reference.type == SceneTargetType.device)
         .toList(growable: false);
-    final controls = scene.controlSlots
-        .map((slot) => slot.control)
-        .whereType<SceneCustomControl>()
-        .toList(growable: false);
+    final controls = scene.controlSlots.map((slot) => slot.control).whereType<SceneCustomControl>().toList(growable: false);
 
     return SceneControlKeyboardDebug(
       scene: scene,
@@ -98,23 +90,15 @@ class _SceneDetailPageState extends ConsumerState<SceneDetailPage> {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: <Widget>[
-            Text(
-              'Custom controls',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            Text('Custom controls', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             if (controls.isEmpty)
-              const _EmptyDetailSection(
-                text:
-                    'У Scene ще немає custom controls. Додайте їх у Settings.',
-              )
+              const _EmptyDetailSection(text: 'У Scene ще немає custom controls. Додайте їх у Settings.')
             else
               ...controls.expand(
                 (control) => <Widget>[
                   SceneCustomControlCard(
-                    key: ValueKey<String>(
-                      'scene-runtime-control-${control.id}',
-                    ),
+                    key: ValueKey<String>('scene-runtime-control-${control.id}'),
                     scene: scene,
                     control: control,
                   ),
@@ -129,10 +113,7 @@ class _SceneDetailPageState extends ConsumerState<SceneDetailPage> {
             else
               ...groups.expand(
                 (resolution) => <Widget>[
-                  _SceneResolvedTargetCard(
-                    resolution: resolution,
-                    onOpen: _openTargetDetails,
-                  ),
+                  _SceneResolvedTargetCard(resolution: resolution, onOpen: _openTargetDetails),
                   const SizedBox(height: 8),
                 ],
               ),
@@ -144,10 +125,7 @@ class _SceneDetailPageState extends ConsumerState<SceneDetailPage> {
             else
               ...devices.expand(
                 (resolution) => <Widget>[
-                  _SceneResolvedTargetCard(
-                    resolution: resolution,
-                    onOpen: _openTargetDetails,
-                  ),
+                  _SceneResolvedTargetCard(resolution: resolution, onOpen: _openTargetDetails),
                   const SizedBox(height: 8),
                 ],
               ),
@@ -164,20 +142,21 @@ class _SceneDetailPageState extends ConsumerState<SceneDetailPage> {
 
   Future<void> _openSettings(LightingScene scene) async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => SceneSettingsPage(scene: scene)),
+      MaterialPageRoute<void>(
+        builder: (_) => SceneSettingsPage(
+          scene: scene,
+          macroReferencesEditor: widget.macroReferencesEditor,
+          macroReferenceResolver: widget.macroReferenceResolver,
+        ),
+      ),
     );
   }
 
   void _openTargetDetails(LightingTarget target) {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => TargetDetailPage(target: target)),
-    );
+    Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => TargetDetailPage(target: target)));
   }
 
-  static LightingScene? _findScene(
-    Iterable<LightingScene> scenes,
-    String sceneId,
-  ) {
+  static LightingScene? _findScene(Iterable<LightingScene> scenes, String sceneId) {
     for (final scene in scenes) {
       if (scene.id == sceneId) {
         return scene;
@@ -188,22 +167,16 @@ class _SceneDetailPageState extends ConsumerState<SceneDetailPage> {
 }
 
 class SceneCustomControlCard extends ConsumerStatefulWidget {
-  const SceneCustomControlCard({
-    super.key,
-    required this.scene,
-    required this.control,
-  });
+  const SceneCustomControlCard({super.key, required this.scene, required this.control});
 
   final LightingScene scene;
   final SceneCustomControl control;
 
   @override
-  ConsumerState<SceneCustomControlCard> createState() =>
-      _SceneCustomControlCardState();
+  ConsumerState<SceneCustomControlCard> createState() => _SceneCustomControlCardState();
 }
 
-class _SceneCustomControlCardState
-    extends ConsumerState<SceneCustomControlCard> {
+class _SceneCustomControlCardState extends ConsumerState<SceneCustomControlCard> {
   double? _previewBrightness;
   RgbColor? _previewColor;
 
@@ -237,10 +210,7 @@ class _SceneCustomControlCardState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(
-                        _titleFor(widget.control),
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
+                      Text(_titleFor(widget.control), style: Theme.of(context).textTheme.titleSmall),
                       Text(
                         view.plan.canDispatch
                             ? '${view.status.targetDeviceCount} ${_deviceWord(view.status.targetDeviceCount)} готово'
@@ -251,11 +221,7 @@ class _SceneCustomControlCardState
                   ),
                 ),
                 if (view.status.isDispatching)
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
+                  const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
               ],
             ),
             const SizedBox(height: 8),
@@ -269,21 +235,11 @@ class _SceneCustomControlCardState
               color: color,
               onPreviewBrightness: (value) {
                 setState(() => _previewBrightness = value);
-                controller.previewBrightness(
-                  widget.scene,
-                  widget.control,
-                  value,
-                );
+                controller.previewBrightness(widget.scene, widget.control, value);
               },
               onCommitBrightness: (value) {
                 setState(() => _previewBrightness = null);
-                unawaited(
-                  controller.commitBrightness(
-                    widget.scene,
-                    widget.control,
-                    value,
-                  ),
-                );
+                unawaited(controller.commitBrightness(widget.scene, widget.control, value));
               },
               onPreviewColor: (value) {
                 final next = lotusHueColor(value);
@@ -295,17 +251,14 @@ class _SceneCustomControlCardState
 
                 setState(() => _previewColor = null);
 
-                unawaited(
-                  controller.commitColor(widget.scene, widget.control, next),
-                );
+                unawaited(controller.commitColor(widget.scene, widget.control, next));
               },
             ),
             if (view.status.issues.isNotEmpty) ...<Widget>[
               const SizedBox(height: 10),
               _SceneControlIssues(issues: view.status.issues),
             ],
-            if (view.status.lastError case final error?
-                when error.isNotEmpty) ...<Widget>[
+            if (view.status.lastError case final error? when error.isNotEmpty) ...<Widget>[
               const SizedBox(height: 10),
               _SceneControlError(message: error),
             ],
@@ -371,9 +324,7 @@ class _ControlBody extends StatelessWidget {
         contentPadding: EdgeInsets.zero,
         title: const Text('Живлення'),
         value: power,
-        onChanged: enabled
-            ? (value) => unawaited(controller.setPower(scene, control, value))
-            : null,
+        onChanged: enabled ? (value) => unawaited(controller.setPower(scene, control, value)) : null,
       ),
       SceneControlType.brightnessSlider => HoldValueControl(
         key: Key('scene-control-${control.id}-brightness'),
@@ -400,10 +351,7 @@ class _ControlBody extends StatelessWidget {
 }
 
 class _SceneResolvedTargetCard extends StatelessWidget {
-  const _SceneResolvedTargetCard({
-    required this.resolution,
-    required this.onOpen,
-  });
+  const _SceneResolvedTargetCard({required this.resolution, required this.onOpen});
 
   final SceneTargetResolution resolution;
   final ValueChanged<LightingTarget> onOpen;
@@ -432,18 +380,10 @@ class _UnavailableSceneTarget extends StatelessWidget {
     return Card(
       color: Theme.of(context).colorScheme.errorContainer,
       child: ListTile(
-        key: Key(
-          'scene-unavailable-${resolution.reference.type.name}-${resolution.reference.targetId}',
-        ),
+        key: Key('scene-unavailable-${resolution.reference.type.name}-${resolution.reference.targetId}'),
         leading: const Icon(Icons.link_off),
-        title: Text(
-          resolution.reference.type == SceneTargetType.group
-              ? 'Недоступна група'
-              : 'Недоступний девайс',
-        ),
-        subtitle: Text(
-          resolution.detail ?? 'Потрібне повторне виявлення або relink.',
-        ),
+        title: Text(resolution.reference.type == SceneTargetType.group ? 'Недоступна група' : 'Недоступний девайс'),
+        subtitle: Text(resolution.detail ?? 'Потрібне повторне виявлення або relink.'),
       ),
     );
   }
@@ -499,10 +439,7 @@ class _SceneControlError extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.errorContainer, borderRadius: BorderRadius.circular(10)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[

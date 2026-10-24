@@ -137,6 +137,13 @@ The initial BLE profile and validation record are in
 [`docs/BLE_PROTOCOLS.md`](docs/BLE_PROTOCOLS.md).
 The planned Scene composition and custom-control slice is specified in
 [`docs/SCENE_SYSTEM.md`](docs/SCENE_SYSTEM.md).
+The modular Scene Macro workflow is implemented: typed graph contracts,
+validation, application-support JSON persistence, a transport-free
+runtime/registry and bounded in-flight-first lighting-intent delivery. Scenes can
+select saved macros; the Macros page provides a patcher editor with
+`Microphone → Multiband EQ`, band configuration, target bindings and runtime
+diagnostics. It does not claim microphone/strip hardware validation. See
+[`docs/SCENE_MACROS.md`](docs/SCENE_MACROS.md).
 
 The current Flutter app also has a local, in-memory **Logs** screen for BLE
 connection/command errors and inbound packets. Lotus E1-shaped FFF4 data may
@@ -204,9 +211,11 @@ than assumed.
 
 The command scheduler keeps a serialized queue per device and handles frame
 coalescing, duplicate elimination, rate limiting, prioritization, recovery, and
-diagnostic metrics. New replaceable animation states supersede old unsent ones,
-which prevents stale-frame backlogs. Initial experimental update targets are 10,
-20, and 30 Hz; actual rates depend on hardware measurements.
+diagnostic metrics. Generic replaceable animation states can supersede old
+unsent ones, which prevents stale-frame backlogs. High-rate Scene Macro bindings
+use the stricter in-flight-first policy: while one device command is pending or
+running, newer macro values are dropped. Initial experimental update targets are
+10, 20, and 30 Hz; actual rates depend on hardware measurements.
 
 When more than one source addresses a device, the desired state is resolved
 deterministically in this order:

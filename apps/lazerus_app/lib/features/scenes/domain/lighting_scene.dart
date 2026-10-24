@@ -1,6 +1,9 @@
 import 'dart:collection';
 
-const int sceneConfigurationSchemaVersion = 1;
+import 'package:lazerus_core/lazerus_core.dart';
+
+const int sceneConfigurationSchemaVersion = 2;
+const int _legacySceneConfigurationSchemaVersion = 1;
 
 /// A stable local reference to a target that participates in a Scene.
 ///
@@ -264,17 +267,28 @@ class LightingScene {
     required this.name,
     Iterable<SceneTargetReference> targets = const <SceneTargetReference>[],
     Iterable<SceneControlSlot> controlSlots = const <SceneControlSlot>[],
+    Iterable<SceneMacroReference> macroReferences =
+        const <SceneMacroReference>[],
   }) : targets = UnmodifiableListView<SceneTargetReference>(
          List<SceneTargetReference>.from(targets),
        ),
        controlSlots = UnmodifiableListView<SceneControlSlot>(
          List<SceneControlSlot>.from(controlSlots),
+       ),
+       macroReferences = UnmodifiableListView<SceneMacroReference>(
+         List<SceneMacroReference>.from(macroReferences),
        ) {
     if (id.trim().isEmpty || name.trim().isEmpty) {
       throw ArgumentError('A Scene requires an id and name.');
     }
     if (this.targets.toSet().length != this.targets.length) {
       throw ArgumentError('A Scene cannot reference the same target twice.');
+    }
+    final macroIds = this.macroReferences
+        .map((reference) => reference.macroId)
+        .toSet();
+    if (macroIds.length != this.macroReferences.length) {
+      throw ArgumentError('A Scene cannot reference the same macro twice.');
     }
     final slotIds = this.controlSlots.map((slot) => slot.id).toSet();
     if (slotIds.length != this.controlSlots.length) {
@@ -303,6 +317,16 @@ class LightingScene {
   final List<SceneTargetReference> targets;
   final List<SceneControlSlot> controlSlots;
 
+  /// Saved macro identities selected by this Scene.
+  ///
+  /// A macro is deliberately an indirect reference: its definition belongs to
+  /// the macro repository, and a missing definition remains here so it can be
+  /// surfaced and repaired instead of being silently discarded.
+  final List<SceneMacroReference> macroReferences;
+
+  Iterable<String> get macroIds =>
+      macroReferences.map((reference) => reference.macroId);
+
   Iterable<SceneTargetReference> get groupTargets =>
       targets.where((target) => target.type == SceneTargetType.group);
 
@@ -314,12 +338,14 @@ class LightingScene {
     String? name,
     Iterable<SceneTargetReference>? targets,
     Iterable<SceneControlSlot>? controlSlots,
+    Iterable<SceneMacroReference>? macroReferences,
   }) {
     return LightingScene(
       id: id ?? this.id,
       name: name ?? this.name,
       targets: targets ?? this.targets,
       controlSlots: controlSlots ?? this.controlSlots,
+      macroReferences: macroReferences ?? this.macroReferences,
     );
   }
 
@@ -328,6 +354,9 @@ class LightingScene {
     'name': name,
     'targets': targets.map((target) => target.toJson()).toList(),
     'controlSlots': controlSlots.map((slot) => slot.toJson()).toList(),
+    'macroReferences': macroReferences
+        .map((reference) => reference.toJson())
+        .toList(),
   };
 
   static LightingScene? fromJson(Object? value) {
@@ -338,10 +367,12 @@ class LightingScene {
     final name = value['name'];
     final rawTargets = value['targets'];
     final rawSlots = value['controlSlots'];
+    final rawMacroReferences = value['macroReferences'] ?? const <Object?>[];
     if (id is! String ||
         name is! String ||
         rawTargets is! List<Object?> ||
-        rawSlots is! List<Object?>) {
+        rawSlots is! List<Object?> ||
+        rawMacroReferences is! List<Object?>) {
       return null;
     }
     final targets = rawTargets
@@ -352,8 +383,13 @@ class LightingScene {
         .map(SceneControlSlot.fromJson)
         .whereType<SceneControlSlot>()
         .toList(growable: false);
+    final macroReferences = rawMacroReferences
+        .map(_sceneMacroReferenceFromJson)
+        .whereType<SceneMacroReference>()
+        .toList(growable: false);
     if (targets.length != rawTargets.length ||
-        slots.length != rawSlots.length) {
+        slots.length != rawSlots.length ||
+        macroReferences.length != rawMacroReferences.length) {
       return null;
     }
     try {
@@ -362,10 +398,22 @@ class LightingScene {
         name: name,
         targets: targets,
         controlSlots: slots,
+        macroReferences: macroReferences,
       );
     } on ArgumentError {
       return null;
     }
+  }
+}
+
+SceneMacroReference? _sceneMacroReferenceFromJson(Object? value) {
+  if (value is! Map<Object?, Object?>) {
+    return null;
+  }
+  try {
+    return SceneMacroReference.fromJson(Map<String, Object?>.from(value));
+  } on Object {
+    return null;
   }
 }
 
@@ -393,9 +441,12 @@ class SceneConfiguration {
   };
 
   static SceneConfiguration? fromJson(Object? value) {
-    if (value is! Map<Object?, Object?> ||
-        value['schemaVersion'] != sceneConfigurationSchemaVersion ||
-        value['scenes'] is! List<Object?>) {
+    if (value is! Map<Object?, Object?> || value['scenes'] is! List<Object?>) {
+      return null;
+    }
+    final schemaVersion = value['schemaVersion'];
+    if (schemaVersion != sceneConfigurationSchemaVersion &&
+        schemaVersion != _legacySceneConfigurationSchemaVersion) {
       return null;
     }
     final rawScenes = value['scenes']! as List<Object?>;

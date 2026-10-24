@@ -23,6 +23,10 @@ void main() {
       id: 'scene-1',
       name: 'Desk scene',
       targets: <SceneTargetReference>[groupReference, deviceReference],
+      macroReferences: <SceneMacroReference>[
+        SceneMacroReference(macroId: 'macro-a'),
+        SceneMacroReference(macroId: 'macro-missing'),
+      ],
       controlSlots: <SceneControlSlot>[
         SceneControlSlot(
           id: 'slot-power',
@@ -51,6 +55,10 @@ void main() {
 
     expect(decoded, isNotNull);
     expect(decoded!.scenes.single.targets, orderedEquals(scene.targets));
+    expect(
+      decoded.scenes.single.macroIds,
+      orderedEquals(const <String>['macro-a', 'macro-missing']),
+    );
     expect(decoded.scenes.single.controlSlots.last.control, isNull);
     expect(
       decoded.scenes.single.controlSlots.first.control!.bindings,
@@ -58,10 +66,58 @@ void main() {
     );
     expect(
       SceneConfiguration.fromJson(<String, Object>{
-        'schemaVersion': 2,
+        'schemaVersion': 3,
         'scenes': <Object>[],
       }),
       isNull,
+    );
+  });
+
+  test('migrates a v1 Scene document without macro references', () {
+    final configuration = SceneConfiguration.fromJson(<String, Object?>{
+      'schemaVersion': 1,
+      'scenes': <Object?>[
+        <String, Object?>{
+          'id': 'scene-v1',
+          'name': 'Legacy Scene',
+          'targets': <Object?>[],
+          'controlSlots': <Object?>[],
+        },
+      ],
+    });
+
+    expect(configuration, isNotNull);
+    expect(configuration!.scenes.single.macroReferences, isEmpty);
+    expect(configuration.toJson()['schemaVersion'], 2);
+  });
+
+  test('keeps missing macro ids as repairable indirect Scene references', () {
+    final scene = LightingScene(
+      id: 'scene-with-macro',
+      name: 'Macro references',
+      macroReferences: <SceneMacroReference>[
+        SceneMacroReference(macroId: 'saved-macro'),
+        SceneMacroReference(macroId: 'removed-macro'),
+      ],
+    );
+
+    final reloaded = LightingScene.fromJson(scene.toJson());
+
+    expect(reloaded, isNotNull);
+    expect(
+      reloaded!.macroIds,
+      orderedEquals(const <String>['saved-macro', 'removed-macro']),
+    );
+    expect(
+      () => LightingScene(
+        id: 'duplicate-macro',
+        name: 'Invalid macro references',
+        macroReferences: <SceneMacroReference>[
+          SceneMacroReference(macroId: 'same'),
+          SceneMacroReference(macroId: 'same'),
+        ],
+      ),
+      throwsArgumentError,
     );
   });
 

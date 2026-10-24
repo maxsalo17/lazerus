@@ -30,5 +30,7 @@
 	<string>NSApplication</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Lazerus шукає та керує сумісними контролерами освітлення поруч.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Lazerus використовує мікрофон для потокових звукових тригерів.</string>
 </dict>
 </plist>

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lazerus_core/lazerus_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../debug/application/debug_devices_controller.dart';
@@ -130,6 +131,41 @@ class ScenesController extends Notifier<ScenesState> {
             .toList(growable: false),
       ),
     );
+  }
+
+  /// Replaces only a Scene's saved macro references.
+  ///
+  /// The method intentionally does not resolve the ids. Macro definitions live
+  /// in their own repository, so a missing macro remains a persisted reference
+  /// that presentation can surface and repair.
+  Future<bool> updateMacroReferences(
+    String sceneId,
+    Iterable<SceneMacroReference> macroReferences,
+  ) async {
+    final normalizedReferences = List<SceneMacroReference>.from(
+      macroReferences,
+    );
+    if (state.isLoading) {
+      _setError('Scenes are still loading. Try again shortly.');
+      return false;
+    }
+    LightingScene? scene;
+    for (final candidate in state.scenes) {
+      if (candidate.id == sceneId) {
+        scene = candidate;
+        break;
+      }
+    }
+    if (scene == null) {
+      _setError('The Scene no longer exists.');
+      return false;
+    }
+    try {
+      return update(scene.copyWith(macroReferences: normalizedReferences));
+    } on ArgumentError catch (error) {
+      _setError('Invalid Scene macro references: $error');
+      return false;
+    }
   }
 
   Future<bool> delete(String sceneId) async {

@@ -51,6 +51,27 @@ cd packages/lazerus_core && flutter test && dart analyze
 cd ../lazerus_proto_lotus_lamp_x && flutter test && dart analyze
 ```
 
+Scene Macro tests are intentionally limited to contract conformance. They cover
+the versioned graph/persistence contracts, one typed runtime route plus a
+registered-port mismatch, and one in-flight-first delivery case. The delivery
+test asserts that values arriving during an in-flight write are dropped and
+that a later value is accepted after it settles. `transmitted` means only the
+transport boundary. No microphone, physical-light reaction, or latency claim
+is made by automated tests.
+
+Task 3 adds only the contract-level checks needed for the new modules: a
+PCM16 mono frame produces the declared microphone audio value, an EQ accepts
+only mono-audio input and emits the port types declared by its saved bands, and
+dynamic configured ports conform to the registered factory contract. Audio
+capture permission, input hardware, lamp response and latency require physical
+validation.
+
+Task 4 does not add a broad widget-test matrix. The existing macro runtime
+route contract also verifies its transient validated-event surface used for
+derived spectrum telemetry; repository fakes implement the same delete
+contract as file storage. Patcher gesture, picker and actual microphone/EQ
+delivery remain manual UI and hardware validation, not synthetic claims.
+
 ## Hardware validation still required
 
 Automated tests do not validate every actual BLE controller. Two strips were

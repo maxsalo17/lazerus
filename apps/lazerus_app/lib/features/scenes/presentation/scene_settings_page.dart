@@ -1,16 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lazerus_core/lazerus_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../application/scene_target_options.dart';
 import '../application/scenes_controller.dart';
 import '../domain/lighting_scene.dart';
 import 'scene_control_editor_page.dart';
+import 'scene_macro_references.dart';
 
 class SceneSettingsPage extends ConsumerStatefulWidget {
-  const SceneSettingsPage({super.key, required this.scene});
+  const SceneSettingsPage({
+    super.key,
+    required this.scene,
+    this.macroReferencesEditor,
+    this.macroReferenceResolver,
+  });
 
   final LightingScene scene;
+
+  /// Optional host integration for selecting or editing macro definitions.
+  final SceneMacroReferencesEditor? macroReferencesEditor;
+
+  /// Optional host integration for detecting persisted missing macro ids.
+  final SceneMacroReferenceResolver? macroReferenceResolver;
 
   @override
   ConsumerState<SceneSettingsPage> createState() => _SceneSettingsPageState();
@@ -146,6 +159,43 @@ class _SceneSettingsPageState extends ConsumerState<SceneSettingsPage> {
                   onClear: slot.control == null ? null : () => _clearSlot(slot),
                 ),
               ),
+            const SizedBox(height: 24),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Macros',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                TextButton.icon(
+                  key: const Key('edit-scene-macros'),
+                  onPressed: canEdit && widget.macroReferencesEditor != null
+                      ? _editMacroReferences
+                      : null,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Керувати'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              widget.macroReferencesEditor == null
+                  ? 'Підключіть macro picker у host page, щоб додавати або замінювати macros.'
+                  : 'Macros зберігаються як посилання. Недоступне посилання можна видалити або замінити.',
+            ),
+            const SizedBox(height: 8),
+            if (_scene.macroReferences.isEmpty)
+              const _EmptyMacroReferenceList()
+            else
+              ..._scene.macroReferences.map(
+                (reference) => _SceneMacroReferenceTile(
+                  reference: reference,
+                  enabled: canEdit,
+                  resolver: widget.macroReferenceResolver,
+                  onRemove: () => _removeMacroReference(reference),
+                ),
+              ),
             if (_localError != null ||
                 (stateError != null && stateError.isNotEmpty)) ...<Widget>[
               const SizedBox(height: 16),
@@ -244,6 +294,55 @@ class _SceneSettingsPageState extends ConsumerState<SceneSettingsPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _editMacroReferences() async {
+    final editor = widget.macroReferencesEditor;
+    if (editor == null) {
+      return;
+    }
+    final references = await editor(context, _scene.macroReferences);
+    if (!mounted || references == null) {
+      return;
+    }
+    await _persistMacroReferences(references);
+  }
+
+  Future<void> _removeMacroReference(SceneMacroReference reference) {
+    return _persistMacroReferences(
+      _scene.macroReferences
+          .where((candidate) => candidate != reference)
+          .toList(growable: false),
+    );
+  }
+
+  Future<void> _persistMacroReferences(
+    Iterable<SceneMacroReference> references,
+  ) async {
+    if (_saving) {
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _localError = null;
+    });
+    final nextReferences = List<SceneMacroReference>.from(references);
+    final saved = await ref
+        .read(scenesProvider.notifier)
+        .updateMacroReferences(_scene.id, nextReferences);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _saving = false;
+      if (saved) {
+        _scene = _scene.copyWith(macroReferences: nextReferences);
+      } else {
+        _localError =
+            ref.read(scenesProvider).error ??
+            'Не вдалося зберегти macros Scene.';
+      }
+    });
   }
 
   Future<void> _openEditor(
@@ -347,6 +446,125 @@ class _SceneSettingsPageState extends ConsumerState<SceneSettingsPage> {
             ref.read(scenesProvider).error ?? 'Не вдалося зберегти Scene.';
       }
     });
+  }
+}
+
+class _EmptyMacroReferenceList extends StatelessWidget {
+  const _EmptyMacroReferenceList();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(12),
+        child: Text('До Scene не додано macros.'),
+      ),
+    );
+  }
+}
+
+class _SceneMacroReferenceTile extends StatefulWidget {
+  const _SceneMacroReferenceTile({
+    required this.reference,
+    required this.enabled,
+    required this.resolver,
+    required this.onRemove,
+  });
+
+  final SceneMacroReference reference;
+  final bool enabled;
+  final SceneMacroReferenceResolver? resolver;
+  final VoidCallback onRemove;
+
+  @override
+  State<_SceneMacroReferenceTile> createState() =>
+      _SceneMacroReferenceTileState();
+}
+
+class _SceneMacroReferenceTileState extends State<_SceneMacroReferenceTile> {
+  late Future<SceneMacroReferenceResolution> _resolution;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolution = _resolve();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SceneMacroReferenceTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.reference.macroId != widget.reference.macroId ||
+        oldWidget.resolver != widget.resolver) {
+      _resolution = _resolve();
+    }
+  }
+
+  Future<SceneMacroReferenceResolution> _resolve() {
+    final resolver = widget.resolver;
+    if (resolver == null) {
+      return Future<SceneMacroReferenceResolution>.value(
+        unknownSceneMacroReference,
+      );
+    }
+    return Future<SceneMacroReferenceResolution>.sync(
+      () => resolver(widget.reference),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<SceneMacroReferenceResolution>(
+      future: _resolution,
+      initialData: unknownSceneMacroReference,
+      builder: (context, snapshot) {
+        final value = snapshot.data ?? unknownSceneMacroReference;
+        final status = snapshot.hasError
+            ? SceneMacroReferenceStatus.unknown
+            : value.status;
+        final detail = snapshot.hasError
+            ? 'Не вдалося перевірити macro: ${snapshot.error}'
+            : value.detail;
+        final color = switch (status) {
+          SceneMacroReferenceStatus.available => Theme.of(
+            context,
+          ).colorScheme.primary,
+          SceneMacroReferenceStatus.missing => Theme.of(
+            context,
+          ).colorScheme.error,
+          SceneMacroReferenceStatus.unknown => Theme.of(
+            context,
+          ).colorScheme.outline,
+        };
+        final statusLabel = switch (status) {
+          SceneMacroReferenceStatus.available => 'Доступний',
+          SceneMacroReferenceStatus.missing => 'Відсутній',
+          SceneMacroReferenceStatus.unknown => 'Не перевірено',
+        };
+        return Card(
+          child: ListTile(
+            key: ValueKey<String>('scene-macro-${widget.reference.macroId}'),
+            leading: Icon(Icons.account_tree_outlined, color: color),
+            title: Text(
+              value.label?.trim().isNotEmpty == true
+                  ? value.label!
+                  : widget.reference.macroId,
+            ),
+            subtitle: Text(
+              detail == null || detail.isEmpty
+                  ? '$statusLabel · ID: ${widget.reference.macroId}'
+                  : '$statusLabel · $detail\nID: ${widget.reference.macroId}',
+            ),
+            isThreeLine: detail != null && detail.isNotEmpty,
+            trailing: IconButton(
+              key: Key('remove-scene-macro-${widget.reference.macroId}'),
+              tooltip: 'Прибрати macro зі Scene',
+              onPressed: widget.enabled ? widget.onRemove : null,
+              icon: const Icon(Icons.remove_circle_outline),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 

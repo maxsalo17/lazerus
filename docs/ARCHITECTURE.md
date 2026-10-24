@@ -354,6 +354,17 @@ UI—owns these cross-protocol concerns:
 - bounded queues and stale replaceable-frame eviction; and
 - transport, protocol, and scheduler diagnostics.
 
+The implemented Scene Macro output follows this same boundary. A macro
+produces a typed lighting intent, never a direct transport write. For reactive
+macro updates, each device accepts exactly one pending or in-flight write;
+newer values are dropped until that write settles, rather than replacing it or
+forming a backlog. A command reported as `transmitted` reaches only the
+transport boundary, not a physical delivery claim. Concrete microphone/EQ
+modules and the Scene Macro library,
+patcher editor and explicit start/stop UI are implemented. Selecting a macro
+in a Scene remains an indirect saved reference; it does not by itself claim a
+full Scene activation, arbitration or deactivation policy.
+
 The adapter may declare command constraints or a device-specific safe update
 rate. It must not create an independent unbounded command queue. A scheduler
 may use a common logical timestamp for multi-device frames, but it must never
@@ -460,6 +471,7 @@ lib/core/
   transports/          # DeviceTransport, BLE driver, sessions, discovery
   protocols/           # adapter registry, contracts, elk implementation
   lighting/            # shared commands, states, capabilities, arbitration
+  macros/              # typed macro graph contracts, validation and runtime
   persistence/         # device bindings, migrations, repositories
   diagnostics/         # transport/protocol/scheduler metrics
 ```
@@ -469,6 +481,17 @@ on Flutter feature packages. `features/devices` consumes repository and runtime
 interfaces only. Native Swift/AppKit/CoreBluetooth code remains an
 implementation detail of `BleTransport` and must not introduce a second device
 manager.
+
+Concrete macro triggers and modifiers are separate modules registered in the
+application composition root. They communicate only through validated typed
+ports and must not import one another. The Scene Macro plan and the initial
+audio/EQ flow are documented in [`SCENE_MACROS.md`](SCENE_MACROS.md).
+
+The initial microphone module is a narrow PCM16 mono-stream adapter with
+explicit permission/session state, while the Multiband EQ is a pure Dart module
+that receives only `TriggerMonoAudioValue`. Microphone bytes are transient and
+never become macro JSON; the EQ has no import of the microphone implementation.
+Both are registered together only by the app composition root.
 
 ## Verification requirements
 

@@ -14,6 +14,10 @@ priorities, stored output states, presets, pipelines, transitions, import/export
 and deactivation policies remain later work. This scope preserves the required
 arbitration order rather than introducing an undocumented competing writer.
 
+The planned reusable trigger-graph extension is documented in
+[`SCENE_MACROS.md`](SCENE_MACROS.md). It remains separate from the delivered
+manual Scene controls until its explicit runtime and scheduler boundary exist.
+
 ## Delivery status
 
 **Tasks 1, 2 and 3 are complete.** The app has immutable Scene composition

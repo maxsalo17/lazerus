@@ -938,6 +938,13 @@ Never queue every intermediate animation frame indefinitely.
 
 When a newer replaceable lighting state becomes available, older untransmitted states should be discarded.
 
+For high-rate Scene Macro trigger bindings, use an explicit in-flight-first
+policy: after the first device command is accepted for dispatch, discard all
+newer macro values for that device until the command settles (success, failure,
+rejection, timeout or drop). Do not replace an in-flight macro command or keep
+a second pending macro frame. This exception prevents reactive streams from
+overwhelming controllers whose write latency is higher than the trigger rate.
+
 Do not coalesce critical ordered operations unless their semantics permit it.
 
 ## 10.4 Update Rates

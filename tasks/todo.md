@@ -34,3 +34,48 @@
     `flutter build macos --debug`.
   - Files: `features/scenes/presentation/scene_detail_page.dart`, scene-control
     widgets/controller, lighting-control integration, diagnostics tests.
+
+## Scene macros and trigger graph
+
+- [x] Task 1: Macro contracts, validation and local JSON persistence
+  - Acceptance: versioned macro graphs use typed ports and immutable values;
+    `triggerMonoAudio` requires samples plus a non-null sample rate, while
+    generic `triggerArray` has no audio metadata. Saved Scene macro references
+    remain repairable when a macro is removed or unavailable.
+  - Verify: core/app contract, JSON round-trip, graph-validation and
+    file-persistence tests; `flutter analyze`, `flutter test`, and macOS debug
+    build.
+  - Files: `lazerus_core` macro contracts, macro repository, Scene reference
+    models and focused tests.
+
+- [x] Task 2: Macro runtime, registry and latest-wins lighting intent boundary
+  - Acceptance: independently registered triggers/modifiers communicate only by
+    typed ports; runtime validates and executes an acyclic graph; per-device
+    pending macro updates are bounded and newer values supersede stale values.
+    A transmitted write is not reported as a physically delivered command.
+  - Verify: focused contract tests for typed runtime routing/registered-port
+    conformance and per-device pending-value replacement; `flutter analyze`,
+    `flutter test`, and macOS debug build.
+  - Files: macro runtime/registry, trigger and modifier interfaces, lighting
+    intent scheduler and diagnostics.
+
+- [x] Task 3: Microphone and Multiband EQ trigger implementations
+  - Acceptance: microphone produces `triggerMonoAudio`; Multiband EQ receives
+    it without importing the microphone module, has configurable bands and
+    threshold/range modes, and emits stable per-band gate/level ports.
+  - Verify: focused contract tests for PCM-to-mono conversion, EQ typed ports
+    and dynamic port-contract conformance; `flutter analyze`, `flutter test`,
+    and macOS debug build. Real microphone/device/latency checks remain manual.
+  - Files: independent microphone and multiband-EQ trigger modules, platform
+    audio boundary and tests.
+
+- [x] Task 4: Scene macro workflow and patcher editor
+  - Acceptance: users save/select macros in Scenes, route node ports and bind
+    outputs to device/group parameters; a desktop X/Y canvas supports
+    drag-to-connect, while a touch-safe iOS presentation remains functional.
+    The EQ displays a live spectrum and band configuration without making raw
+    audio persistence claims.
+  - Verify: controller/widget integration, broken-reference, binding and
+    drag-to-connect tests; `flutter analyze`, `flutter test`, and macOS build.
+  - Files: Scene macro pages/controllers, patcher canvas/widgets and
+    diagnostics UI.

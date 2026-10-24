@@ -11,10 +11,16 @@ class SceneControlKeyboardDebug extends StatefulWidget {
   final LightingScene scene;
   final SceneControlsController sceneControls;
   final Widget child;
-  const SceneControlKeyboardDebug({super.key, required this.scene, required this.sceneControls, required this.child});
+  const SceneControlKeyboardDebug({
+    super.key,
+    required this.scene,
+    required this.sceneControls,
+    required this.child,
+  });
 
   @override
-  State<SceneControlKeyboardDebug> createState() => _SceneControlKeyboardDebugState();
+  State<SceneControlKeyboardDebug> createState() =>
+      _SceneControlKeyboardDebugState();
 }
 
 class _SceneControlKeyboardDebugState extends State<SceneControlKeyboardDebug> {
@@ -114,7 +120,11 @@ class _SceneControlKeyboardDebugState extends State<SceneControlKeyboardDebug> {
     return KeyEventResult.ignored;
   }
 
-  Future<void> _setSceneColor(LightingScene scene, int? color, [int maxColors = 7]) async {
+  Future<void> _setSceneColor(
+    LightingScene scene,
+    int? color, [
+    int maxColors = 7,
+  ]) async {
     RgbColor next;
     if (color != null) {
       final value = color / maxColors;
