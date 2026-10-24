@@ -221,6 +221,10 @@ class DeviceObservation {
 enum CommandOutcome {
   rejected,
   queued,
+
+  /// The protocol accepted the command but did not write because its encoded
+  /// frame was unchanged or within the declared protocol delta.
+  deduplicated,
   transmitted,
   acknowledged,
   observed,
@@ -250,6 +254,14 @@ class CommandResult {
     return CommandResult(
       command: command,
       outcome: CommandOutcome.rejected,
+      detail: detail,
+    );
+  }
+
+  factory CommandResult.deduplicated(LightingCommand command, String detail) {
+    return CommandResult(
+      command: command,
+      outcome: CommandOutcome.deduplicated,
       detail: detail,
     );
   }

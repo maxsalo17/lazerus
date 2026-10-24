@@ -57,6 +57,17 @@ class _HoldValueControlState extends State<HoldValueControl> {
   int? _activePointer;
 
   @override
+  void didUpdateWidget(covariant HoldValueControl oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A higher-priority macro input can disable this control while its pointer
+    // is still down. End that gesture immediately so no later preview/commit
+    // can send a manual value after ownership changed.
+    if (oldWidget.enabled && !widget.enabled && _activePointer != null) {
+      _clearHold();
+    }
+  }
+
+  @override
   void dispose() {
     _removeOverlay();
     super.dispose();
@@ -73,7 +84,9 @@ class _HoldValueControlState extends State<HoldValueControl> {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          border: widget.enabled ? null : Border.all(color: Theme.of(context).disabledColor),
+          border: widget.enabled
+              ? null
+              : Border.all(color: Theme.of(context).disabledColor),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Padding(
@@ -81,7 +94,12 @@ class _HoldValueControlState extends State<HoldValueControl> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(widget.kind == HoldValueKind.hue ? Icons.palette_outlined : Icons.brightness_6_outlined, size: 18),
+              Icon(
+                widget.kind == HoldValueKind.hue
+                    ? Icons.palette_outlined
+                    : Icons.brightness_6_outlined,
+                size: 18,
+              ),
               const SizedBox(width: 6),
               SizedBox(
                 width: 52,
@@ -124,7 +142,8 @@ class _HoldValueControlState extends State<HoldValueControl> {
     }
     final delta = event.position - start;
     if (!_isHolding) {
-      if (delta.dx.abs() < _dragActivationOffset || delta.dx.abs() <= delta.dy.abs()) {
+      if (delta.dx.abs() < _dragActivationOffset ||
+          delta.dx.abs() <= delta.dy.abs()) {
         return;
       }
       _isHolding = true;
@@ -134,12 +153,15 @@ class _HoldValueControlState extends State<HoldValueControl> {
 
     // The first five horizontal pixels only activate the control. The value
     // begins changing afterwards, so the popup does not jump on activation.
-    final adjustedDelta = delta.dx - (delta.dx.isNegative ? -_dragActivationOffset : _dragActivationOffset);
+    final adjustedDelta =
+        delta.dx -
+        (delta.dx.isNegative ? -_dragActivationOffset : _dragActivationOffset);
     _updateValue(adjustedDelta);
   }
 
   void _updateValue(double horizontalDelta) {
-    final nextValue = (_startValue + horizontalDelta / _fullRangeDragDistance).clamp(0.0, 1.0);
+    final nextValue = (_startValue + horizontalDelta / _fullRangeDragDistance)
+        .clamp(0.0, 1.0);
 
     if ((nextValue - _activeValue).abs() < 0.001) {
       return;
@@ -188,21 +210,44 @@ class _HoldValueControlState extends State<HoldValueControl> {
     if (!overlayBox.hasSize || !targetBox.hasSize) {
       return;
     }
-    final targetTopLeft = targetBox.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final targetTopLeft = targetBox.localToGlobal(
+      Offset.zero,
+      ancestor: overlayBox,
+    );
     final targetRect = targetTopLeft & targetBox.size;
-    final popupWidth = math.min(_popupWidth, math.max(0, overlayBox.size.width - _viewportInset * 2)).toDouble();
-    final maxLeft = math.max(_viewportInset, overlayBox.size.width - popupWidth - _viewportInset);
-    final left = (targetRect.center.dx - popupWidth / 2).clamp(_viewportInset, maxLeft).toDouble();
-    final maxTop = math.max(_viewportInset, overlayBox.size.height - _popupHeight - _viewportInset);
+    final popupWidth = math
+        .min(
+          _popupWidth,
+          math.max(0, overlayBox.size.width - _viewportInset * 2),
+        )
+        .toDouble();
+    final maxLeft = math.max(
+      _viewportInset,
+      overlayBox.size.width - popupWidth - _viewportInset,
+    );
+    final left = (targetRect.center.dx - popupWidth / 2)
+        .clamp(_viewportInset, maxLeft)
+        .toDouble();
+    final maxTop = math.max(
+      _viewportInset,
+      overlayBox.size.height - _popupHeight - _viewportInset,
+    );
     final above = targetRect.top - _popupHeight - _popupGap;
-    final top = (above >= _viewportInset ? above : targetRect.bottom + _popupGap).clamp(_viewportInset, maxTop).toDouble();
+    final top =
+        (above >= _viewportInset ? above : targetRect.bottom + _popupGap)
+            .clamp(_viewportInset, maxTop)
+            .toDouble();
     _overlayEntry = OverlayEntry(
       builder: (context) => Positioned(
         left: left,
         top: top,
         width: popupWidth,
         child: IgnorePointer(
-          child: _HoldValuePopup(kind: widget.kind, value: _activeValue, brightnessColor: widget.brightnessColor),
+          child: _HoldValuePopup(
+            kind: widget.kind,
+            value: _activeValue,
+            brightnessColor: widget.brightnessColor,
+          ),
         ),
       ),
     );
@@ -216,7 +261,11 @@ class _HoldValueControlState extends State<HoldValueControl> {
 }
 
 class _HoldValuePopup extends StatelessWidget {
-  const _HoldValuePopup({required this.kind, required this.value, required this.brightnessColor});
+  const _HoldValuePopup({
+    required this.kind,
+    required this.value,
+    required this.brightnessColor,
+  });
 
   final HoldValueKind kind;
   final double value;
@@ -238,11 +287,18 @@ class _HoldValuePopup extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text(isHue ? 'Колір' : 'Яскравість ${(value * 100).round()}%', style: Theme.of(context).textTheme.titleSmall),
+              Text(
+                isHue ? 'Колір' : 'Яскравість ${(value * 100).round()}%',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
               const SizedBox(height: 10),
               SizedBox(
                 height: 34,
-                child: _GradientTrack(kind: kind, value: value, brightnessColor: brightnessColor),
+                child: _GradientTrack(
+                  kind: kind,
+                  value: value,
+                  brightnessColor: brightnessColor,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
@@ -258,7 +314,12 @@ class _HoldValuePopup extends StatelessWidget {
 }
 
 class _GradientTrack extends StatelessWidget {
-  const _GradientTrack({required this.kind, required this.value, required this.brightnessColor, this.compact = false});
+  const _GradientTrack({
+    required this.kind,
+    required this.value,
+    required this.brightnessColor,
+    this.compact = false,
+  });
 
   final HoldValueKind kind;
   final double value;
@@ -268,13 +329,19 @@ class _GradientTrack extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isHue = kind == HoldValueKind.hue;
-    final selectedColor = isHue ? colorFromRgb(lotusHueColor(value)) : Color.lerp(Colors.black, brightnessColor, value)!;
+    final selectedColor = isHue
+        ? colorFromRgb(lotusHueColor(value))
+        : Color.lerp(Colors.black, brightnessColor, value)!;
     final markerSize = compact ? 10.0 : 26.0;
     return DecoratedBox(
       key: compact ? null : const Key('hold-value-gradient'),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        gradient: LinearGradient(colors: isHue ? lotusHueGradient : <Color>[Colors.black, brightnessColor]),
+        gradient: LinearGradient(
+          colors: isHue
+              ? lotusHueGradient
+              : <Color>[Colors.black, brightnessColor],
+        ),
       ),
       child: Align(
         alignment: Alignment(value * 2 - 1, 0),
@@ -284,8 +351,15 @@ class _GradientTrack extends StatelessWidget {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: selectedColor,
-            border: Border.all(color: isHue ? Colors.white : Colors.white70, width: compact ? 1 : 2),
-            boxShadow: compact ? null : const <BoxShadow>[BoxShadow(color: Colors.black38, blurRadius: 4)],
+            border: Border.all(
+              color: isHue ? Colors.white : Colors.white70,
+              width: compact ? 1 : 2,
+            ),
+            boxShadow: compact
+                ? null
+                : const <BoxShadow>[
+                    BoxShadow(color: Colors.black38, blurRadius: 4),
+                  ],
           ),
         ),
       ),

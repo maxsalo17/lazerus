@@ -95,6 +95,15 @@ abstract interface class LightingProtocolAdapter {
 abstract interface class LightingDeviceSession {
   String get protocolAdapterId;
   DeviceCapabilities get capabilities;
+
+  /// The protocol-specific threshold used to suppress lighting writes that
+  /// would not produce a meaningful change for this controller profile.
+  ///
+  /// This is a session property because different protocol variants or
+  /// firmware profiles can use different encoder resolutions. It is not a
+  /// device capability claim or a measured statement about physical output.
+  ProtocolCommandDelta get commandDelta;
+
   Stream<DeviceObservation> get observations;
 
   /// The partial lighting state last accepted by this protocol session or
@@ -108,6 +117,38 @@ abstract interface class LightingDeviceSession {
   /// declared read mechanism. The result is emitted through [observations].
   Future<void> requestCurrentState();
   Future<void> close();
+}
+
+/// Per-protocol thresholds for suppressing small standard-lighting changes.
+///
+/// [brightness] uses the shared normalized `0…1` brightness domain.
+/// [rgbChannel] uses the shared `0…255` channel domain. A session may ignore
+/// a candidate colour only when every RGB channel differs from the last
+/// emitted colour by at most [rgbChannel]. Power and native-effect commands
+/// remain exact operations and are deduplicated only when their encoded frames
+/// are byte-identical.
+///
+/// Every protocol session must also compare its final encoded frames. That
+/// guarantees that values which quantize to the same protocol packet never
+/// produce redundant transport writes, even when this profile is zero.
+class ProtocolCommandDelta {
+  const ProtocolCommandDelta({this.brightness = 0, this.rgbChannel = 0})
+    : assert(brightness >= 0 && brightness <= 1),
+      assert(rgbChannel >= 0 && rgbChannel <= 255);
+
+  /// Largest normalized brightness difference that can be omitted.
+  final double brightness;
+
+  /// Largest difference per RGB channel that can be omitted.
+  final int rgbChannel;
+
+  bool ignoresBrightnessChange(double previous, double candidate) =>
+      (previous - candidate).abs() <= brightness;
+
+  bool ignoresColorChange(RgbColor previous, RgbColor candidate) =>
+      (previous.red - candidate.red).abs() <= rgbChannel &&
+      (previous.green - candidate.green).abs() <= rgbChannel &&
+      (previous.blue - candidate.blue).abs() <= rgbChannel;
 }
 
 class ProtocolCandidate {

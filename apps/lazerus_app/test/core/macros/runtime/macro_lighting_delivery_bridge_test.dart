@@ -124,6 +124,42 @@ void main() {
       await bridge.close();
     },
   );
+
+  test(
+    'restores the pre-macro desired state only for a changed device',
+    () async {
+      final beforeMacro = DesiredLightingState(
+        power: true,
+        color: RgbColor(0, 120, 255),
+        brightness: 0.35,
+      );
+      final gateway = _ImmediateGateway(currentState: beforeMacro);
+      final bridge = MacroLightingDeliveryBridge(
+        targetResolver: const _Resolver(<String>{'device-a'}),
+        deviceGateway: gateway,
+      );
+      bridge.captureStatesBeforeMacroWrites(<MacroTargetBinding>[
+        MacroTargetBinding(
+          id: 'brightness-binding',
+          sourcePortId: 'source.level',
+          targetKind: MacroTargetKind.device,
+          targetId: 'device-a',
+          parameter: MacroTargetParameter.brightness,
+        ),
+      ]);
+
+      bridge.submit(_brightnessIntent(0.9, sequence: 1));
+      await bridge.drain();
+      await bridge.restoreChangedDeviceStates();
+
+      expect(gateway.commands, hasLength(2));
+      expect(gateway.commands.first.state.brightness, 0.9);
+      expect(gateway.commands.last.state.power, beforeMacro.power);
+      expect(gateway.commands.last.state.color, beforeMacro.color);
+      expect(gateway.commands.last.state.brightness, beforeMacro.brightness);
+      await bridge.close();
+    },
+  );
 }
 
 MacroLightingIntent _brightnessIntent(double value, {required int sequence}) =>
@@ -163,6 +199,9 @@ final class _BlockingGateway implements MacroLightingDeviceGateway {
   final List<ApplyLightingState> commands = <ApplyLightingState>[];
 
   @override
+  DesiredLightingState? currentDesiredState(String appDeviceId) => null;
+
+  @override
   bool canDispatch(String appDeviceId, DesiredLightingState state) => true;
 
   @override
@@ -183,7 +222,13 @@ final class _BlockingGateway implements MacroLightingDeviceGateway {
 }
 
 final class _ImmediateGateway implements MacroLightingDeviceGateway {
+  _ImmediateGateway({this.currentState});
+
+  final DesiredLightingState? currentState;
   final List<ApplyLightingState> commands = <ApplyLightingState>[];
+
+  @override
+  DesiredLightingState? currentDesiredState(String appDeviceId) => currentState;
 
   @override
   bool canDispatch(String appDeviceId, DesiredLightingState state) => true;

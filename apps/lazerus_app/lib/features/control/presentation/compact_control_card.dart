@@ -11,10 +11,24 @@ import 'color_utils.dart';
 import 'hold_value_control.dart';
 
 class CompactControlCard extends ConsumerStatefulWidget {
-  const CompactControlCard({super.key, required this.target, this.onOpen});
+  CompactControlCard({
+    super.key,
+    required this.target,
+    this.onOpen,
+    Iterable<LightingFeature> inputDrivenFeatures = const <LightingFeature>{},
+    this.inputDrivenMessage,
+  }) : inputDrivenFeatures = Set<LightingFeature>.unmodifiable(
+         inputDrivenFeatures,
+       );
 
   final LightingTarget target;
   final VoidCallback? onOpen;
+
+  /// Parameters currently owned by a higher-priority live input. The normal
+  /// Controls view leaves this empty; the Macro editor uses it after a routed
+  /// input has emitted at least one value.
+  final Set<LightingFeature> inputDrivenFeatures;
+  final String? inputDrivenMessage;
 
   @override
   ConsumerState<CompactControlCard> createState() => _CompactControlCardState();
@@ -24,6 +38,24 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
   double? _previewBrightness;
   RgbColor? _previewColor;
   var _suppressCardOpen = false;
+
+  @override
+  void didUpdateWidget(covariant CompactControlCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final gainedInputOwner = widget.inputDrivenFeatures.any(
+      (feature) => !oldWidget.inputDrivenFeatures.contains(feature),
+    );
+    if (!gainedInputOwner) return;
+
+    // A drag can have one sampled command waiting in the shared ticker. Once
+    // the macro has emitted for a parameter, discard that manual preview so a
+    // delayed write cannot overtake the input-owned state.
+    _previewBrightness = null;
+    _previewColor = null;
+    ref
+        .read(lightingControlsProvider.notifier)
+        .cancelReplaceable(widget.target.id);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +79,15 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
         .length;
     final isEnabled = connectedCount > 0;
     final isOn = state.power ?? false;
+    final powerDriven = widget.inputDrivenFeatures.contains(
+      LightingFeature.power,
+    );
+    final colorDriven =
+        widget.inputDrivenFeatures.contains(LightingFeature.rgb) ||
+        widget.inputDrivenFeatures.contains(LightingFeature.rgbw);
+    final brightnessDriven = widget.inputDrivenFeatures.contains(
+      LightingFeature.brightness,
+    );
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -106,7 +147,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                   ),
                   IconButton.filled(
                     tooltip: isOn ? 'Вимкнути' : 'Увімкнути',
-                    onPressed: isEnabled
+                    onPressed: isEnabled && !powerDriven
                         ? () => unawaited(_dispatch(SetPower(!isOn)))
                         : null,
                     icon: Icon(isOn ? Icons.power_settings_new : Icons.power),
@@ -122,7 +163,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                     value: lotusHueValueFor(color),
                     label: 'Колір',
                     brightnessColor: colorFromRgb(color),
-                    enabled: isEnabled,
+                    enabled: isEnabled && !colorDriven,
                     onInteractionStart: _suppressOpenForDrag,
                     onInteractionEnd: _clearDragOpenSuppression,
                     onPreview: (value) {
@@ -149,7 +190,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                     value: brightness,
                     label: '${(brightness * 100).round()}%',
                     brightnessColor: colorFromRgb(color),
-                    enabled: isEnabled,
+                    enabled: isEnabled && !brightnessDriven,
                     onInteractionStart: _suppressOpenForDrag,
                     onInteractionEnd: _clearDragOpenSuppression,
                     onPreview: (value) {
@@ -168,9 +209,18 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                         : (_) => setState(() => _previewBrightness = null),
                   ),
                   const Spacer(),
-                  const Icon(Icons.open_in_new, size: 18),
+                  if (widget.onOpen != null)
+                    const Icon(Icons.open_in_new, size: 18),
                 ],
               ),
+              if (widget.inputDrivenFeatures.isNotEmpty &&
+                  widget.inputDrivenMessage != null) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  widget.inputDrivenMessage!,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
             ],
           ),
         ),

@@ -103,6 +103,15 @@ The bridge converts a `triggerHsv → Color` binding to the shared RGB desired
 state, then the existing device-calibration and protocol-command boundaries
 apply. No macro module knows a protocol frame format.
 
+At macro start, the delivery bridge snapshots the app's local desired state for
+the currently resolved targets. It marks a device as changed only when a macro
+write is accepted for dispatch. Stop — including Back from the Macro editor —
+first stops event production and lets an accepted write settle, then makes one
+best-effort `ApplyLightingState` request with that device's pre-macro state.
+The snapshot moves with a validated live runtime replacement, so live editing
+does not reset the restoration baseline. An unavailable device is not queued
+for a later restore; a transport acceptance still is not physical confirmation.
+
 ## Modular architecture
 
 Macro-graph contracts and trigger/modifier contracts are public, Flutter-free
@@ -339,11 +348,13 @@ indices so the intended cable is selected before detaching. Node titles also
 include their plot index for this disambiguation. Touch has the equivalent
 tap-to-start then tap-to-finish workflow.
 Node positions, edges, bands, source settings and target-node-derived bindings
-are saved with **Save**. Pressing **Start** also first saves the current editor
-draft, then builds the runtime from that persisted version; this ensures a
-visible source setting such as a Color modifier hue is the value the runtime
-emits. While a macro is running the editor is read-only, so its graph cannot
-silently diverge from the active runtime.
+are saved with **Save** or **⌘S**. Pressing **Start** first saves the current
+editor draft, then builds the runtime from that persisted version. While a
+macro is running, its editor remains available: runtime-relevant draft changes
+are coalesced for 120 ms and applied as a validated in-memory runtime
+replacement without writing the macro file. Invalid live changes retain the
+last valid runtime and report repair diagnostics; use Save/⌘S when the edit
+should survive a restart.
 
 The EQ inspector exposes stable bands, gate/level mode and relevant threshold
 or normalization values. It receives only an in-memory, derived spectrum view
@@ -356,7 +367,11 @@ capability at send time.
 
 The runtime panel presents validation issues and the latest delivery outcome.
 It distinguishes `transmitted` from controller confirmation and preserves the
-in-flight-first value-drop policy. Start and stop are explicit. Scene
+in-flight-first value-drop policy. Selecting a device target shows the same
+compact power, colour and brightness controls as the Controls view. A control
+remains available until its connected input emits a value; from the first value
+onward that input has macro-specific priority over the corresponding manual
+control until Stop or the edge is disconnected. Start and stop are explicit. Scene
 selection does not yet mean automatic Scene activation, conflict arbitration or
 an iOS background guarantee. While the editor is open, microphone
 permission/capture status is shown without retaining its PCM data.

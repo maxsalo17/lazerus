@@ -18,6 +18,14 @@ class LotusLampXProtocolAdapter implements LightingProtocolAdapter {
 
   static const String adapterId = 'lazerus.protocol.lotus_lamp_x';
 
+  /// Conservative, profile-specific write suppression for the inferred E1
+  /// codec. These thresholds are not a measured claim about every ELK/Lotus
+  /// controller; validate and tune them per hardware/firmware profile.
+  static const ProtocolCommandDelta commandDelta = ProtocolCommandDelta(
+    brightness: 2 / 255,
+    rgbChannel: 2,
+  );
+
   /// Enables command writes only for an explicitly chosen diagnostic session.
   ///
   /// Product UI must leave this false until the matching hardware profile has
@@ -153,6 +161,7 @@ class LotusLampXProtocolAdapter implements LightingProtocolAdapter {
       transportSession: transportSession,
       capabilities: probe.capabilities ?? inferredCapabilities(),
       allowUnverifiedCommands: allowUnverifiedCommands,
+      commandDelta: commandDelta,
     );
   }
 
@@ -192,6 +201,8 @@ class LotusLampXProtocolAdapter implements LightingProtocolAdapter {
             'frameLength': '9',
             'writeCharacteristic':
                 LotusLampXBleIdentifiers.writeCharacteristicUuid,
+            'brightnessDelta': '2/255 normalized',
+            'rgbChannelDelta': '2',
           },
         ),
       },
@@ -205,6 +216,7 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
     required this.transportSession,
     required this.capabilities,
     required this.allowUnverifiedCommands,
+    required this.commandDelta,
   }) {
     _incomingSubscription = transportSession.incomingMessages.listen(
       _onIncomingMessage,
@@ -217,10 +229,17 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
   final DeviceCapabilities capabilities;
 
   final bool allowUnverifiedCommands;
+
+  @override
+  final ProtocolCommandDelta commandDelta;
+
   final StreamController<DeviceObservation> _observations =
       StreamController<DeviceObservation>.broadcast();
   late final StreamSubscription<TransportMessage> _incomingSubscription;
   DesiredLightingState? _lastKnownState;
+  DesiredLightingState? _lastTransmittedLightingState;
+  final Map<int, Uint8List> _lastEmittedFrames = <int, Uint8List>{};
+  Uint8List? _lastNativeEffectFrame;
   var _isClosed = false;
 
   @override
@@ -247,17 +266,23 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
       );
     }
 
-    final frames = _framesFor(command);
-    if (frames == null) {
+    final plan = _planFor(command);
+    if (plan == null) {
       return CommandResult.rejected(
         command,
         'This Lotus Lamp X profile does not encode the requested command.',
       );
     }
+    if (plan.frames.isEmpty) {
+      return CommandResult.deduplicated(
+        command,
+        'No Lotus Lamp X packet differed from the prior output or the configured command delta.',
+      );
+    }
 
     final receipts = <TransportReceipt>[];
     try {
-      for (final frame in frames) {
+      for (final frame in plan.frames) {
         final receipt = await transportSession.send(
           TransportMessage(
             frame,
@@ -290,7 +315,7 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
         ? CommandOutcome.transmitted
         : CommandOutcome.queued;
 
-    _rememberCommand(command);
+    _rememberTransmittedPlan(plan);
     return CommandResult(
       command: command,
       outcome: outcome,
@@ -331,64 +356,86 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
     await _observations.close();
   }
 
-  List<Uint8List>? _framesFor(LightingCommand command) {
+  _LotusCommandPlan? _planFor(LightingCommand command) {
     if (command is SetPower) {
-      return <Uint8List>[LotusLampXFrameCodec.power(command.enabled)];
+      return _planForState(DesiredLightingState(power: command.enabled));
     }
     if (command is SetColor) {
-      return <Uint8List>[
-        LotusLampXFrameCodec.color(
-          command.color.red,
-          command.color.green,
-          command.color.blue,
-        ),
-      ];
+      return _planForState(DesiredLightingState(color: command.color));
     }
     if (command is SetBrightness) {
-      return <Uint8List>[
-        LotusLampXFrameCodec.brightness(
-          LotusLampXFrameCodec.normalizedBrightnessToByte(command.value),
-        ),
-      ];
+      return _planForState(DesiredLightingState(brightness: command.value));
     }
     if (command is SetNativeEffect) {
       final effect = LotusLampXNativeEffect.fromDeviceEffect(command.effect);
-      return effect == null
-          ? null
-          : <Uint8List>[LotusLampXFrameCodec.nativeEffect(effect)];
+      if (effect == null) return null;
+      final frame = LotusLampXFrameCodec.nativeEffect(effect);
+      if (_sameFrame(frame, _lastNativeEffectFrame) || !_isNewFrame(frame)) {
+        return _LotusCommandPlan.empty();
+      }
+      return _LotusCommandPlan(
+        frames: <Uint8List>[frame],
+        nativeEffectFrame: frame,
+      );
     }
     if (command is ApplyLightingState) {
-      return _framesForState(command.state);
+      return _planForState(command.state);
     }
     return null;
   }
 
-  List<Uint8List> _framesForState(DesiredLightingState state) {
+  _LotusCommandPlan _planForState(DesiredLightingState state) {
     if (state.power == false) {
-      return <Uint8List>[LotusLampXFrameCodec.power(false)];
+      final frame = LotusLampXFrameCodec.power(false);
+      return _shouldSendPower(false) && _isNewFrame(frame)
+          ? _LotusCommandPlan(
+              frames: <Uint8List>[frame],
+              transmittedState: DesiredLightingState(power: false),
+            )
+          : _LotusCommandPlan.empty();
     }
 
     final frames = <Uint8List>[];
+    bool? power;
+    RgbColor? color;
+    double? brightness;
     if (state.color != null) {
-      frames.add(
-        LotusLampXFrameCodec.color(
-          state.color!.red,
-          state.color!.green,
-          state.color!.blue,
-        ),
+      final frame = LotusLampXFrameCodec.color(
+        state.color!.red,
+        state.color!.green,
+        state.color!.blue,
       );
+      if (_shouldSendColor(state.color!) && _isNewFrame(frame)) {
+        frames.add(frame);
+        color = state.color;
+      }
     }
     if (state.brightness != null) {
-      frames.add(
-        LotusLampXFrameCodec.brightness(
-          LotusLampXFrameCodec.normalizedBrightnessToByte(state.brightness!),
-        ),
+      final frame = LotusLampXFrameCodec.brightness(
+        LotusLampXFrameCodec.normalizedBrightnessToByte(state.brightness!),
       );
+      if (_shouldSendBrightness(state.brightness!) && _isNewFrame(frame)) {
+        frames.add(frame);
+        brightness = state.brightness;
+      }
     }
     if (state.power == true) {
-      frames.add(LotusLampXFrameCodec.power(true));
+      final frame = LotusLampXFrameCodec.power(true);
+      if (_shouldSendPower(true) && _isNewFrame(frame)) {
+        frames.add(frame);
+        power = true;
+      }
     }
-    return frames;
+    return _LotusCommandPlan(
+      frames: frames,
+      transmittedState: frames.isEmpty
+          ? null
+          : DesiredLightingState(
+              power: power,
+              color: color,
+              brightness: brightness,
+            ),
+    );
   }
 
   void _onIncomingMessage(TransportMessage message) {
@@ -398,6 +445,10 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
     final state = LotusLampXFrameCodec.tryDecodeE1State(message.payload);
     if (state != null) {
       _lastKnownState = _mergeState(_lastKnownState, state);
+      _lastTransmittedLightingState = _mergeState(
+        _lastTransmittedLightingState,
+        state,
+      );
     }
     _observations.add(
       DeviceObservation(
@@ -413,17 +464,71 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
     );
   }
 
-  void _rememberCommand(LightingCommand command) {
-    final state = switch (command) {
-      SetPower(:final enabled) => DesiredLightingState(power: enabled),
-      SetColor(:final color) => DesiredLightingState(color: color),
-      SetBrightness(:final value) => DesiredLightingState(brightness: value),
-      ApplyLightingState(:final state) => state,
-      _ => null,
-    };
-    if (state != null) {
-      _lastKnownState = _mergeState(_lastKnownState, state);
+  bool _shouldSendPower(bool candidate) =>
+      _lastTransmittedLightingState?.power != candidate;
+
+  bool _shouldSendColor(RgbColor candidate) {
+    final previous = _lastTransmittedLightingState?.color;
+    return previous == null ||
+        !commandDelta.ignoresColorChange(previous, candidate);
+  }
+
+  bool _shouldSendBrightness(double candidate) {
+    final previous = _lastTransmittedLightingState?.brightness;
+    return previous == null ||
+        !commandDelta.ignoresBrightnessChange(previous, candidate);
+  }
+
+  bool _isNewFrame(Uint8List frame) {
+    final previous = _lastEmittedFrames[_frameKey(frame)];
+    return !_sameFrame(previous, frame);
+  }
+
+  void _rememberTransmittedPlan(_LotusCommandPlan plan) {
+    for (final frame in plan.frames) {
+      _lastEmittedFrames[_frameKey(frame)] = Uint8List.fromList(frame);
     }
+    final state = plan.transmittedState;
+    if (state != null && !state.isEmpty) {
+      _lastKnownState = _mergeState(_lastKnownState, state);
+      _lastTransmittedLightingState = _mergeState(
+        _lastTransmittedLightingState,
+        state,
+      );
+      // A direct state frame can replace a native effect. The same effect may
+      // therefore be intentionally selected again afterwards.
+      _lastNativeEffectFrame = null;
+      _lastEmittedFrames.remove(_modeFrameKey);
+    }
+    if (plan.nativeEffectFrame != null) {
+      _lastNativeEffectFrame = Uint8List.fromList(plan.nativeEffectFrame!);
+      // A native effect may alter visible direct-lighting parameters. Make a
+      // future manual/static lighting command explicit instead of trusting a
+      // stale cached RGB or brightness value.
+      _lastTransmittedLightingState = null;
+      _lastEmittedFrames.removeWhere(
+        (key, _) =>
+            key == _frameKey(LotusLampXFrameCodec.power(false)) ||
+            key == _frameKey(LotusLampXFrameCodec.power(true)) ||
+            key == _frameKey(LotusLampXFrameCodec.color(0, 0, 0)) ||
+            key == _frameKey(LotusLampXFrameCodec.brightness(0)),
+      );
+    }
+  }
+
+  static int _frameKey(Uint8List frame) => (frame[1] << 8) | frame[2];
+
+  // E1 mode packets have command-length byte 0x07 and command byte 0x03.
+  static const int _modeFrameKey = 0x0703;
+
+  static bool _sameFrame(Uint8List? left, Uint8List? right) {
+    if (left == null || right == null || left.length != right.length) {
+      return false;
+    }
+    for (var index = 0; index < left.length; index++) {
+      if (left[index] != right[index]) return false;
+    }
+    return true;
   }
 
   static DesiredLightingState _mergeState(
@@ -436,4 +541,21 @@ class LotusLampXDeviceSession implements LightingDeviceSession {
       brightness: incoming.brightness ?? previous?.brightness,
     );
   }
+}
+
+final class _LotusCommandPlan {
+  _LotusCommandPlan({
+    required this.frames,
+    this.transmittedState,
+    this.nativeEffectFrame,
+  });
+
+  _LotusCommandPlan.empty()
+    : frames = const <Uint8List>[],
+      transmittedState = null,
+      nativeEffectFrame = null;
+
+  final List<Uint8List> frames;
+  final DesiredLightingState? transmittedState;
+  final Uint8List? nativeEffectFrame;
 }

@@ -159,6 +159,7 @@ abstract interface class LightingProtocolAdapter {
 abstract interface class LightingDeviceSession {
   String get protocolAdapterId;
   DeviceCapabilities get capabilities;
+  ProtocolCommandDelta get commandDelta;
   Stream<DeviceObservation> get observations;
   DesiredLightingState? get lastKnownState;
 
@@ -257,6 +258,8 @@ mapping are explicit.
 - rejected before sending because the capability, state, or connection is
   invalid;
 - accepted/queued by the scheduler;
+- deduplicated locally by the selected protocol because a final encoded packet
+  is unchanged or its domain value falls within the profile's declared delta;
 - sent at the transport layer;
 - acknowledged by a transport or protocol when that acknowledgement exists;
 - observed by the device when a reliable observation exists; and
@@ -264,6 +267,23 @@ mapping are explicit.
 
 Neither a BLE write without response nor a future MQTT/HTTP delivery receipt is
 represented as a confirmed physical lighting state.
+
+### Protocol write deltas and packet deduplication
+
+Each `LightingDeviceSession` exposes an immutable `ProtocolCommandDelta`. It
+defines only its own brightness and RGB threshold in shared domain units. The
+protocol session applies that threshold after application-level calibration and
+before transport I/O, then also compares final encoded packets byte-for-byte.
+The byte comparison is mandatory: a codec may quantize two distinct domain
+values into one identical frame. Power and native-effect operations stay exact
+and are suppressed only if their encoded command is identical.
+
+`deduplicated` means no transport message was written. It is a successful
+local scheduling decision, distinct from `transmitted`, a hardware observation,
+and an error. The application can retain its requested desired state while a
+session retains the last state it actually emitted. Delta values are
+profile-specific tuning inputs, never evidence of a controller's measured
+physical response.
 
 ## Capability model
 
@@ -492,7 +512,9 @@ device or group. Its incoming edges derive the portable runtime target binding;
 it performs no I/O. `triggerHsv` remains a macro value until the app delivery
 bridge converts it to the shared RGB state, after which normal calibration and
 protocol encoding apply. This keeps colour modifiers, target nodes and Lotus X
-independent of one another.
+independent of one another. The bridge owns the runtime-only pre-macro desired
+state snapshot: the editor has no transport access, and Stop performs a bounded
+best-effort restoration only for devices that macro writes actually changed.
 
 The initial microphone module is a narrow PCM16 mono-stream adapter with
 explicit permission/session state, while the Multiband EQ is a pure Dart module

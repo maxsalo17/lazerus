@@ -101,6 +101,16 @@ minimally lit. Drag updates are sampled at most once per 100 ms with replacement
 of stale pending values; this is a local UI safeguard, not the centralized
 scheduler required by the full specification.
 
+Before each Lotus transport write, the active protocol session suppresses a
+packet if its final E1 bytes duplicate the last emitted packet for that command
+kind. It also has the initial, per-session `ProtocolCommandDelta` profile of
+at most `2 / 255` normalized brightness and at most two units in every RGB
+channel. A command within that profile returns `deduplicated` without an FFF3
+write; power and native-effect frames require exact equality. These thresholds
+are conservative engineering defaults for packet reduction, **not measured
+hardware response claims**; validate and tune them for controller/firmware
+profiles before treating them as visual-quality guarantees.
+
 The app can optionally apply a manual, per-device hue curve to that same
 red-to-violet command arc. It is a local, best-effort correction for nonlinear
 strips, applied before this adapter encodes E1 RGB bytes. It does not modify

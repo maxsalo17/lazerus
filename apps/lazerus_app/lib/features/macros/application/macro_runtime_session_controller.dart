@@ -253,6 +253,15 @@ final class MacroRuntimeSessionController
   late final MacroLightingDeliveryBridge Function() _newBridge;
   final Map<String, _ActiveMacroRuntimeSession> _active =
       <String, _ActiveMacroRuntimeSession>{};
+  // A live editor update prepares its replacement asynchronously.  A run
+  // generation prevents a replacement that was already preparing from
+  // reviving a macro after the user has stopped it.
+  final Map<String, int> _runGenerations = <String, int>{};
+  // Stop also awaits any launch that was already past the editor debounce.
+  // Otherwise it could report a stopped macro before a stale replacement has
+  // completed the restoration path it inherited from the previous session.
+  final Map<String, Set<Completer<void>>> _launchCompletions =
+      <String, Set<Completer<void>>>{};
   final StreamController<MacroRuntimeSessionEvent> _events =
       StreamController<MacroRuntimeSessionEvent>.broadcast();
   var _disposed = false;
@@ -273,8 +282,9 @@ final class MacroRuntimeSessionController
 
   /// Validates and starts the currently saved definition for [macroId].
   ///
-  /// A second start replaces the prior session only after it has been stopped,
-  /// so a macro can never retain two active microphone/module instances.
+  /// A second start replaces the prior session only after a valid replacement
+  /// is prepared, so a macro can never retain two active microphone/module
+  /// instances while a bad definition need not tear down a working one.
   Future<bool> start(String macroId) async {
     final definition = ref.read(macroLibraryProvider).byId(macroId);
     if (definition == null) {
@@ -287,27 +297,87 @@ final class MacroRuntimeSessionController
       );
       return false;
     }
-
-    await stop(macroId);
-    if (_disposed) return false;
-    _setStatus(
-      MacroRuntimeSessionStatus(
-        macroId: macroId,
-        lifecycle: MacroRuntimeSessionLifecycle.starting,
-      ),
+    return _launch(
+      definition,
+      preserveRunningOnFailure: false,
+      expectedRunGeneration: _advanceRunGeneration(macroId),
     );
+  }
 
+  /// Replaces an already running session with [definition] from an editor's
+  /// in-memory draft. It does not persist that draft. Invalid changes leave the
+  /// previous runtime active and surface repair diagnostics instead.
+  Future<bool> updateRunning(MacroGraph definition) {
+    final runGeneration = _runGenerations[definition.id];
+    if (runGeneration == null || !_active.containsKey(definition.id)) {
+      return Future<bool>.value(false);
+    }
+    return _launch(
+      definition,
+      preserveRunningOnFailure: true,
+      expectedRunGeneration: runGeneration,
+    );
+  }
+
+  Future<bool> _launch(
+    MacroGraph definition, {
+    required bool preserveRunningOnFailure,
+    required int expectedRunGeneration,
+  }) {
+    final completion = Completer<void>();
+    _launchCompletions
+        .putIfAbsent(definition.id, () => <Completer<void>>{})
+        .add(completion);
+    return _launchInternal(
+      definition,
+      preserveRunningOnFailure: preserveRunningOnFailure,
+      expectedRunGeneration: expectedRunGeneration,
+    ).whenComplete(() {
+      completion.complete();
+      final completions = _launchCompletions[definition.id];
+      completions?.remove(completion);
+      if (completions?.isEmpty ?? false) {
+        _launchCompletions.remove(definition.id);
+      }
+    });
+  }
+
+  Future<bool> _launchInternal(
+    MacroGraph definition, {
+    required bool preserveRunningOnFailure,
+    required int expectedRunGeneration,
+  }) async {
+    final macroId = definition.id;
+    if (!_isCurrentRunGeneration(macroId, expectedRunGeneration)) {
+      return false;
+    }
+    final previousSession = _active[macroId];
     final runtime = MacroRuntime(graph: definition, registry: _registry);
     final issues = runtime.validate();
     if (issues.isNotEmpty) {
       await runtime.dispose();
-      final status = MacroRuntimeSessionStatus(
-        macroId: macroId,
-        lifecycle: MacroRuntimeSessionLifecycle.invalid,
-        validationIssues: issues,
-        detail: 'The saved graph must be repaired before it can run.',
-      );
-      _setStatus(status);
+      if (!_isCurrentRunGeneration(macroId, expectedRunGeneration)) {
+        return false;
+      }
+      final current = state.sessions[macroId];
+      if (preserveRunningOnFailure &&
+          previousSession != null &&
+          current != null) {
+        _updateStatus(
+          current.copyWith(
+            validationIssues: issues,
+            detail: 'Live changes must be repaired before they can apply.',
+          ),
+        );
+      } else {
+        final status = MacroRuntimeSessionStatus(
+          macroId: macroId,
+          lifecycle: MacroRuntimeSessionLifecycle.invalid,
+          validationIssues: issues,
+          detail: 'The macro graph must be repaired before it can run.',
+        );
+        _setStatus(status);
+      }
       _emit(
         MacroRuntimeSessionEvent.validation(
           macroId: macroId,
@@ -319,7 +389,7 @@ final class MacroRuntimeSessionController
 
     final bridge = _newBridge();
     final binding = bridge.bind(runtime);
-    final session = _ActiveMacroRuntimeSession(
+    final candidate = _ActiveMacroRuntimeSession(
       runtime: runtime,
       bridge: bridge,
       binding: binding,
@@ -331,12 +401,58 @@ final class MacroRuntimeSessionController
       ),
     );
     try {
+      // Preparing before releasing the prior session preserves a valid live
+      // runtime when a module factory rejects new configuration.
       runtime.prepare();
-      _active[macroId] = session;
+    } on Object catch (error) {
+      await candidate.dispose();
+      if (!_isCurrentRunGeneration(macroId, expectedRunGeneration)) {
+        return false;
+      }
+      _reportLaunchFailure(
+        macroId: macroId,
+        error: error,
+        preserveRunning: preserveRunningOnFailure && previousSession != null,
+      );
+      return false;
+    }
+
+    // A live edit is a runtime replacement, not a Stop. Preserve the state
+    // that existed before the macro originally began, then capture only newly
+    // introduced targets from this definition.
+    if (previousSession != null) {
+      bridge.inheritRestorationStateFrom(previousSession.bridge);
+    }
+    bridge.captureStatesBeforeMacroWrites(definition.targetBindings);
+    if (!_isCurrentRunGeneration(macroId, expectedRunGeneration)) {
+      await candidate.dispose();
+      return false;
+    }
+
+    _setStatus(
+      MacroRuntimeSessionStatus(
+        macroId: macroId,
+        lifecycle: MacroRuntimeSessionLifecycle.starting,
+      ),
+    );
+    final previous = _active.remove(macroId);
+    if (previous != null) await previous.dispose();
+    if (!_isCurrentRunGeneration(macroId, expectedRunGeneration)) {
+      // Stop can happen while a live replacement has released the former
+      // session. This candidate inherited its restoration baseline, so it
+      // must finish that restore instead of merely disposing it.
+      await candidate.stopAndRestore();
+      return false;
+    }
+    try {
+      _active[macroId] = candidate;
       runtime.start();
-      final current = state.sessions[macroId];
+      // Some source/modifier nodes emit synchronously from start(). Preserve
+      // those first output values for the patcher and input-priority UI rather
+      // than replacing them with a fresh running status.
+      final started = state.sessions[macroId];
       _setStatus(
-        (current ??
+        (started ??
                 MacroRuntimeSessionStatus(
                   macroId: macroId,
                   lifecycle: MacroRuntimeSessionLifecycle.starting,
@@ -346,30 +462,63 @@ final class MacroRuntimeSessionController
       return true;
     } on Object catch (error) {
       _active.remove(macroId);
-      await session.dispose();
-      final status = MacroRuntimeSessionStatus(
+      // A source can fail while starting after an eager modifier already
+      // emitted. Treat that as a stopped macro run and restore its baseline.
+      await candidate.stopAndRestore();
+      _reportLaunchFailure(
         macroId: macroId,
-        lifecycle: MacroRuntimeSessionLifecycle.error,
-        detail: 'Could not start macro runtime.',
         error: error,
-      );
-      _setStatus(status);
-      _emit(
-        MacroRuntimeSessionEvent.error(
-          macroId: macroId,
-          error: error,
-          detail: status.detail!,
-        ),
+        preserveRunning: false,
       );
       return false;
     }
   }
 
+  void _reportLaunchFailure({
+    required String macroId,
+    required Object error,
+    required bool preserveRunning,
+  }) {
+    final current = state.sessions[macroId];
+    final detail = preserveRunning
+        ? 'Live changes could not be applied; the current runtime continues.'
+        : 'Could not start macro runtime.';
+    if (preserveRunning && current != null) {
+      _updateStatus(current.copyWith(detail: detail, error: error));
+    } else {
+      _setStatus(
+        MacroRuntimeSessionStatus(
+          macroId: macroId,
+          lifecycle: MacroRuntimeSessionLifecycle.error,
+          detail: detail,
+          error: error,
+        ),
+      );
+    }
+    _emit(
+      MacroRuntimeSessionEvent.error(
+        macroId: macroId,
+        error: error,
+        detail: detail,
+      ),
+    );
+  }
+
   /// Stops and releases one active runtime. Calling this for an already stopped
-  /// macro is safe and leaves an explicit stopped diagnostic state.
+  /// macro is safe and leaves an explicit stopped diagnostic state. Before
+  /// releasing the session it restores the locally tracked state from before
+  /// the macro's first write, for devices this macro actually changed.
   Future<void> stop(String macroId) async {
+    // Invalidates a possibly in-flight live replacement before it can put a
+    // candidate runtime back into [_active] after this method restores state.
+    _advanceRunGeneration(macroId);
+    final pendingLaunches =
+        (_launchCompletions[macroId] ?? const <Completer<void>>{})
+            .map((completion) => completion.future)
+            .toList(growable: false);
     final session = _active.remove(macroId);
-    if (session != null) await session.dispose();
+    if (session != null) await session.stopAndRestore();
+    await Future.wait(pendingLaunches);
     if (!_disposed) {
       _setStatus(
         MacroRuntimeSessionStatus(
@@ -381,11 +530,23 @@ final class MacroRuntimeSessionController
   }
 
   Future<void> _disposeAll() async {
-    final active = _active.values.toList(growable: false);
+    final active = _active.entries.toList(growable: false);
     _active.clear();
-    await Future.wait(active.map((session) => session.dispose()));
+    for (final entry in active) {
+      _advanceRunGeneration(entry.key);
+    }
+    await Future.wait(active.map((entry) => entry.value.stopAndRestore()));
     await _events.close();
   }
+
+  int _advanceRunGeneration(String macroId) {
+    final next = (_runGenerations[macroId] ?? 0) + 1;
+    _runGenerations[macroId] = next;
+    return next;
+  }
+
+  bool _isCurrentRunGeneration(String macroId, int expected) =>
+      !_disposed && _runGenerations[macroId] == expected;
 
   void _onDelivery(String macroId, MacroLightingDeliveryStatus delivery) {
     if (_disposed) return;
@@ -576,11 +737,29 @@ final class _ActiveMacroRuntimeSession {
   final StreamSubscription<MacroLightingDeliveryStatus> deliverySubscription;
   final StreamSubscription<TriggerEvent> telemetrySubscription;
 
+  /// Stops event production, lets an already accepted macro write settle, and
+  /// restores the captured pre-macro desired state before closing the bridge.
+  Future<void> stopAndRestore() async {
+    await binding.close();
+    await runtime.dispose();
+    await bridge.drain();
+    await bridge.restoreChangedDeviceStates();
+    await _closeObserversAndBridge();
+  }
+
+  /// Releases a session for a validated live replacement. It intentionally
+  /// does not restore device state: the replacement inherits that state and
+  /// remains the same logical macro run.
   Future<void> dispose() async {
     await binding.close();
+    await runtime.dispose();
+    await bridge.drain();
+    await _closeObserversAndBridge();
+  }
+
+  Future<void> _closeObserversAndBridge() async {
     await deliverySubscription.cancel();
     await telemetrySubscription.cancel();
-    await runtime.dispose();
     await bridge.close();
   }
 }

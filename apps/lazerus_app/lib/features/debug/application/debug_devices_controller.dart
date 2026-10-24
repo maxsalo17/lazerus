@@ -984,6 +984,7 @@ class DebugDevicesController extends Notifier<DebugModuleState> {
 
   static bool _wasAccepted(CommandResult result) {
     return result.outcome == CommandOutcome.queued ||
+        result.outcome == CommandOutcome.deduplicated ||
         result.outcome == CommandOutcome.transmitted ||
         result.outcome == CommandOutcome.acknowledged ||
         result.outcome == CommandOutcome.observed;

@@ -113,6 +113,52 @@ void main() {
     },
   );
 
+  test(
+    'suppresses duplicate and sub-delta Lotus lighting frames per session',
+    () async {
+      final transport = _RecordingTransportSession();
+      final adapter = LotusLampXProtocolAdapter(allowUnverifiedCommands: true);
+      final device = await adapter.openSession(
+        transport,
+        const ProtocolProbeResult(status: ProtocolProbeStatus.unverified),
+      );
+
+      expect(device.commandDelta, LotusLampXProtocolAdapter.commandDelta);
+      expect(
+        (await device.execute(SetBrightness(0.5))).outcome,
+        CommandOutcome.transmitted,
+      );
+      expect(
+        (await device.execute(SetBrightness(0.5 + 1 / 255))).outcome,
+        CommandOutcome.deduplicated,
+      );
+      expect(transport.sentMessages, hasLength(1));
+
+      expect(
+        (await device.execute(SetBrightness(0.5 + 3 / 255))).outcome,
+        CommandOutcome.transmitted,
+      );
+      expect(transport.sentMessages, hasLength(2));
+
+      expect(
+        (await device.execute(SetColor(RgbColor(100, 120, 140)))).outcome,
+        CommandOutcome.transmitted,
+      );
+      expect(
+        (await device.execute(SetColor(RgbColor(102, 122, 142)))).outcome,
+        CommandOutcome.deduplicated,
+      );
+      expect(
+        (await device.execute(SetColor(RgbColor(103, 123, 143)))).outcome,
+        CommandOutcome.transmitted,
+      );
+      expect(transport.sentMessages, hasLength(4));
+
+      await device.close();
+      await transport.dispose();
+    },
+  );
+
   test('encodes black ApplyLightingState as a black RGB frame', () async {
     final transport = _RecordingTransportSession();
     final adapter = LotusLampXProtocolAdapter(allowUnverifiedCommands: true);
