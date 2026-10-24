@@ -5,6 +5,7 @@ import 'package:lazerus_core/lazerus_core.dart';
 
 import '../modifiers/color/color_modifier.dart';
 import '../modifiers/color_brightness_combine/color_brightness_combine_modifier.dart';
+import '../modifiers/strobe/strobe_modifier.dart';
 import '../sinks/lighting_target_sink.dart';
 import '../triggers/microphone/microphone_mono_audio_trigger.dart';
 import '../triggers/microphone/microphone_pcm_session.dart';
@@ -47,4 +48,5 @@ MacroModuleRegistry createMacroModuleRegistry({
   ..register(multibandEq ?? MultibandEqTriggerFactory())
   ..register(ColorModifierFactory())
   ..register(ColorBrightnessCombineModifierFactory())
+  ..register(StrobeModifierFactory())
   ..register(LightingTargetSinkFactory());

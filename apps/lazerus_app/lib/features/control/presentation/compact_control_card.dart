@@ -17,9 +17,7 @@ class CompactControlCard extends ConsumerStatefulWidget {
     this.onOpen,
     Iterable<LightingFeature> inputDrivenFeatures = const <LightingFeature>{},
     this.inputDrivenMessage,
-  }) : inputDrivenFeatures = Set<LightingFeature>.unmodifiable(
-         inputDrivenFeatures,
-       );
+  }) : inputDrivenFeatures = Set<LightingFeature>.unmodifiable(inputDrivenFeatures);
 
   final LightingTarget target;
   final VoidCallback? onOpen;
@@ -42,9 +40,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
   @override
   void didUpdateWidget(covariant CompactControlCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final gainedInputOwner = widget.inputDrivenFeatures.any(
-      (feature) => !oldWidget.inputDrivenFeatures.contains(feature),
-    );
+    final gainedInputOwner = widget.inputDrivenFeatures.any((feature) => !oldWidget.inputDrivenFeatures.contains(feature));
     if (!gainedInputOwner) return;
 
     // A drag can have one sampled command waiting in the shared ticker. Once
@@ -52,9 +48,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
     // delayed write cannot overtake the input-owned state.
     _previewBrightness = null;
     _previewColor = null;
-    ref
-        .read(lightingControlsProvider.notifier)
-        .cancelReplaceable(widget.target.id);
+    ref.read(lightingControlsProvider.notifier).cancelReplaceable(widget.target.id);
   }
 
   @override
@@ -73,21 +67,14 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
     final connectedCount = target.memberDeviceIds
         .map((deviceId) => devices[deviceId])
         .whereType<DebugDevice>()
-        .where(
-          (device) => device.status == DebugDeviceConnectionStatus.connected,
-        )
+        .where((device) => device.status == DebugDeviceConnectionStatus.connected)
         .length;
     final isEnabled = connectedCount > 0;
     final isOn = state.power ?? false;
-    final powerDriven = widget.inputDrivenFeatures.contains(
-      LightingFeature.power,
-    );
+    final powerDriven = widget.inputDrivenFeatures.contains(LightingFeature.power);
     final colorDriven =
-        widget.inputDrivenFeatures.contains(LightingFeature.rgb) ||
-        widget.inputDrivenFeatures.contains(LightingFeature.rgbw);
-    final brightnessDriven = widget.inputDrivenFeatures.contains(
-      LightingFeature.brightness,
-    );
+        widget.inputDrivenFeatures.contains(LightingFeature.rgb) || widget.inputDrivenFeatures.contains(LightingFeature.rgbw);
+    final brightnessDriven = widget.inputDrivenFeatures.contains(LightingFeature.brightness);
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -117,9 +104,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                           ? LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
-                              colors: swatchColors
-                                  .map(colorFromRgb)
-                                  .toList(growable: false),
+                              colors: swatchColors.map(colorFromRgb).toList(growable: false),
                             )
                           : null,
                       borderRadius: BorderRadius.circular(99),
@@ -145,13 +130,18 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                       ],
                     ),
                   ),
-                  IconButton.filled(
-                    tooltip: isOn ? 'Вимкнути' : 'Увімкнути',
-                    onPressed: isEnabled && !powerDriven
-                        ? () => unawaited(_dispatch(SetPower(!isOn)))
-                        : null,
-                    icon: Icon(isOn ? Icons.power_settings_new : Icons.power),
-                  ),
+                  if (isOn)
+                    IconButton.filled(
+                      tooltip: 'Вимкнути',
+                      onPressed: isEnabled && !powerDriven ? () => unawaited(_dispatch(SetPower(false))) : null,
+                      icon: Icon(Icons.power_settings_new),
+                    )
+                  else
+                    IconButton.outlined(
+                      tooltip: 'Увімкнути',
+                      onPressed: isEnabled && !powerDriven ? () => unawaited(_dispatch(SetPower(true))) : null,
+                      icon: Icon(Icons.power_settings_new),
+                    ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -175,10 +165,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                         ? (value) {
                             final selected = lotusHueColor(value);
                             setState(() => _previewColor = null);
-                            controls.queueReplaceable(
-                              target,
-                              SetColor(selected),
-                            );
+                            controls.queueReplaceable(target, SetColor(selected));
                             unawaited(controls.flushReplaceable(target.id));
                           }
                         : (_) => setState(() => _previewColor = null),
@@ -200,26 +187,18 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                     onCommit: isEnabled
                         ? (value) {
                             setState(() => _previewBrightness = null);
-                            controls.queueReplaceable(
-                              target,
-                              SetBrightness(value),
-                            );
+                            controls.queueReplaceable(target, SetBrightness(value));
                             unawaited(controls.flushReplaceable(target.id));
                           }
                         : (_) => setState(() => _previewBrightness = null),
                   ),
                   const Spacer(),
-                  if (widget.onOpen != null)
-                    const Icon(Icons.open_in_new, size: 18),
+                  if (widget.onOpen != null) const Icon(Icons.open_in_new, size: 18),
                 ],
               ),
-              if (widget.inputDrivenFeatures.isNotEmpty &&
-                  widget.inputDrivenMessage != null) ...<Widget>[
+              if (widget.inputDrivenFeatures.isNotEmpty && widget.inputDrivenMessage != null) ...<Widget>[
                 const SizedBox(height: 8),
-                Text(
-                  widget.inputDrivenMessage!,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                Text(widget.inputDrivenMessage!, style: Theme.of(context).textTheme.bodySmall),
               ],
             ],
           ),
@@ -229,9 +208,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
   }
 
   Future<void> _dispatch(LightingCommand command) async {
-    await ref
-        .read(lightingControlsProvider.notifier)
-        .dispatch(widget.target, command);
+    await ref.read(lightingControlsProvider.notifier).dispatch(widget.target, command);
   }
 
   void _suppressOpenForDrag() {

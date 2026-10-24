@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazerus_app/core/macros/modifiers/color/color_modifier.dart';
 import 'package:lazerus_app/core/macros/modifiers/color_brightness_combine/color_brightness_combine_modifier.dart';
+import 'package:lazerus_app/core/macros/modifiers/strobe/strobe_modifier.dart';
 import 'package:lazerus_app/core/macros/registry/macro_module_registry.dart';
 import 'package:lazerus_app/core/macros/sinks/lighting_target_sink.dart';
 import 'package:lazerus_core/lazerus_core.dart';
@@ -92,7 +93,88 @@ void main() {
       ]),
     );
   });
+
+  testWidgets(
+    'strobe emits one duration-limited brightness pulse for each gate rise',
+    (tester) async {
+      final factory = StrobeModifierFactory();
+      final configuration = StrobeModifierConfiguration.fromNodeParameters(
+        const <String, Object?>{},
+      );
+      final node = MacroNode(
+        id: 'strobe',
+        kind: strobeModifierKind,
+        ports: StrobeModifierFactory.portsForNode('strobe'),
+        parameters: configuration.toNodeParameters(),
+      );
+      final emitter = _CapturingEmitter();
+      final instance = factory.create(node);
+      instance.start(emitter);
+
+      expect(configuration.flashDuration, const Duration(milliseconds: 100));
+      expect(
+        node.ports.map((port) => port.type),
+        orderedEquals(<MacroPortType>[
+          MacroPortType.triggerGate,
+          MacroPortType.triggerLevel,
+        ]),
+      );
+
+      instance.onInput(
+        'strobe.gate',
+        TriggerEvent(
+          sourcePortId: 'eq.low',
+          timestamp: Duration.zero,
+          sequence: 1,
+          primaryValue: TriggerGateValue(true),
+        ),
+      );
+      instance.onInput(
+        'strobe.gate',
+        TriggerEvent(
+          sourcePortId: 'eq.low',
+          timestamp: const Duration(milliseconds: 10),
+          sequence: 2,
+          primaryValue: TriggerGateValue(true),
+        ),
+      );
+
+      expect(_emittedLevels(emitter), <double>[1]);
+      await tester.pump(const Duration(milliseconds: 99));
+      expect(_emittedLevels(emitter), <double>[1]);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(_emittedLevels(emitter), <double>[1, 0]);
+
+      instance.onInput(
+        'strobe.gate',
+        TriggerEvent(
+          sourcePortId: 'eq.low',
+          timestamp: const Duration(milliseconds: 100),
+          sequence: 3,
+          primaryValue: TriggerGateValue(false),
+        ),
+      );
+      instance.onInput(
+        'strobe.gate',
+        TriggerEvent(
+          sourcePortId: 'eq.low',
+          timestamp: const Duration(milliseconds: 101),
+          sequence: 4,
+          primaryValue: TriggerGateValue(true),
+        ),
+      );
+      expect(_emittedLevels(emitter), <double>[1, 0, 1]);
+
+      instance.stop();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_emittedLevels(emitter), <double>[1, 0, 1]);
+    },
+  );
 }
+
+List<double> _emittedLevels(_CapturingEmitter emitter) => emitter.events
+    .map((event) => (event.primaryValue as TriggerLevelValue).value)
+    .toList(growable: false);
 
 final class _CapturingEmitter implements MacroRuntimeEventEmitter {
   final List<TriggerEvent> events = <TriggerEvent>[];

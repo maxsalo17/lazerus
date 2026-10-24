@@ -147,7 +147,9 @@ apps/lazerus_app/lib/core/macros/
 
 apps/lazerus_app/lib/features/macros/
   application/     # Riverpod controllers
-  presentation/    # library, editor, patcher canvas and inspectors
+  presentation/
+    node_modules/   # isolated node UI modules and their one registry
+    # library, generic editor, patcher canvas and palette
 ```
 
 Each trigger/modifier exposes a definition, port declarations, parameter
@@ -156,6 +158,16 @@ import a sibling trigger or modifier. The only permitted communication between
 modules is an event across a validated graph edge. Removing a module leaves its
 saved node and bindings detectable as unavailable/repairable; it must not
 silently rewrite or delete macro JSON.
+
+The Flutter editor follows the same boundary. `MacroEditorPage` knows only the
+generic graph, connection rules, persistence, and runtime replacement. A
+`MacroEditorNodeModule` owns a single node family's palette entry, construction,
+title, compact plot-card body, inspector, and configuration updates. Sink
+modules may additionally own their binding derivation and legacy migration.
+`macro_editor_node_registry.dart` is the sole presentation composition root
+that imports more than one concrete module. Therefore adding or removing a
+node family requires registering one self-contained module, without extending
+type checks in the editor, palette, or patcher canvas.
 
 ## Target nodes and initial colour modifiers
 
@@ -172,6 +184,14 @@ component with that level and emits a new `triggerHsv` output. Its level input
 is not a strip brightness command. Both outputs use ordinary graph edge
 fan-out, so one colour source or combined colour can drive multiple compatible
 inputs while any one input still permits only one source.
+
+`modifier.strobe` takes one `triggerGate` input and emits one `triggerLevel`
+brightness pulse. A rising `true` emits `1` immediately and `0` after its
+persisted `flashDurationMilliseconds` (100 ms by default). `false` ends an
+active flash early; a held `true` does not enqueue further timers, so a new
+flash requires a `false → true` edge. It can be placed between an EQ gate
+output and `modifier.color_brightness_combine` to drive the output HSV Value.
+Stopping or replacing the macro runtime cancels its active flash timer.
 
 Colour delivery is converted at the application bridge to `RgbColor`, then
 passes through existing per-device calibration and the selected protocol
