@@ -64,7 +64,6 @@ void main() {
 
   test('registry resolves the input-only target sink contract', () {
     final configuration = LightingTargetNodeConfiguration(
-      targetKind: MacroTargetKind.device,
       targetId: 'device-1',
       parameters: <MacroTargetParameter>[
         MacroTargetParameter.brightness,

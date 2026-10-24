@@ -33,7 +33,6 @@ void main() {
             MacroTargetBinding(
               id: 'brightness',
               sourcePortId: 'out',
-              targetKind: MacroTargetKind.device,
               targetId: 'device',
               parameter: MacroTargetParameter.brightness,
             ),

@@ -1,6 +1,6 @@
 import 'package:lazerus_core/lazerus_core.dart';
 
-/// A manually selected HSV colour source for a Scene Macro graph.
+/// A manually selected HSV colour source for a Macro graph.
 ///
 /// It is deliberately a source modifier: its compact editor control owns the
 /// persisted HSV value and it has no upstream dependency. Other modules only

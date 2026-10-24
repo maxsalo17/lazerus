@@ -72,7 +72,7 @@ class DebugDevice {
     this.localState,
   });
 
-  /// Stable local identity used by groups and persisted configuration.
+  /// Stable local identity used by persisted configuration and macro targets.
   final String appDeviceId;
   final TransportEndpoint endpoint;
   final String protocolId;
@@ -98,11 +98,11 @@ class DebugDevice {
   /// calibrated for transport and must not replace the requested UI colour.
   final DesiredLightingState? transportState;
 
-  /// The merged desired state used by UI and group aggregation. It is updated
+  /// The merged desired state used by UI. It is updated
   /// by accepted app commands, not treated as physical confirmation.
   final DesiredLightingState? localState;
 
-  /// Locally tracked state for rendering and group aggregation. It is never a
+  /// Locally tracked state for rendering. It is never a
   /// claim that a write changed the physical strip.
   DesiredLightingState get lastKnownState =>
       localState ??

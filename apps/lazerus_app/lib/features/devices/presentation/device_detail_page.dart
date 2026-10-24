@@ -5,40 +5,34 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lazerus_core/lazerus_core.dart';
 
 import '../../debug/application/debug_devices_controller.dart';
-import '../../devices/presentation/device_display.dart';
-import '../../groups/application/group_targets.dart';
-import '../application/lighting_controls_controller.dart';
+import '../application/device_controls_controller.dart';
 import 'color_utils.dart';
+import 'device_display.dart';
 
-class TargetDetailPage extends ConsumerStatefulWidget {
-  const TargetDetailPage({super.key, required this.target});
+/// Full manual-control surface for one physical device.
+class DeviceDetailPage extends ConsumerStatefulWidget {
+  const DeviceDetailPage({super.key, required this.appDeviceId});
 
-  final LightingTarget target;
+  final String appDeviceId;
 
   @override
-  ConsumerState<TargetDetailPage> createState() => _TargetDetailPageState();
+  ConsumerState<DeviceDetailPage> createState() => _DeviceDetailPageState();
 }
 
-class _TargetDetailPageState extends ConsumerState<TargetDetailPage> {
+class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
   double? _previewBrightness;
 
   @override
   Widget build(BuildContext context) {
-    final target = widget.target;
-    final devices = ref.watch(debugDevicesProvider).devices;
-    final controlNotifier = ref.read(lightingControlsProvider.notifier);
-    final controlState = controlNotifier.stateFor(target);
+    final device = ref.watch(debugDevicesProvider).devices[widget.appDeviceId];
+    final controls = ref.read(deviceControlsProvider.notifier);
+    final controlState = controls.stateFor(widget.appDeviceId);
     final brightness = _previewBrightness ?? controlState.brightness;
-    final connectedDevices = target.memberDeviceIds
-        .map((id) => devices[id])
-        .whereType<DebugDevice>()
-        .where(
-          (device) => device.status == DebugDeviceConnectionStatus.connected,
-        )
-        .length;
+    final connected = device?.status == DebugDeviceConnectionStatus.connected;
+    final name = device?.endpoint.displayName ?? 'Девайс';
 
     return Scaffold(
-      appBar: AppBar(title: Text(target.name)),
+      appBar: AppBar(title: Text(name)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
@@ -48,19 +42,15 @@ class _TargetDetailPageState extends ConsumerState<TargetDetailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(
-                    target.isGroup
-                        ? '$connectedDevices з ${target.memberDeviceIds.length} девайсів підключено'
-                        : _singleDeviceStatus(devices[target.id]),
-                  ),
+                  Text(_deviceStatus(device)),
                   const SizedBox(height: 16),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Живлення'),
                     value: controlState.power ?? false,
-                    onChanged: connectedDevices == 0
-                        ? null
-                        : (enabled) => unawaited(_dispatch(SetPower(enabled))),
+                    onChanged: connected
+                        ? (enabled) => unawaited(_dispatch(SetPower(enabled)))
+                        : null,
                   ),
                   const Divider(),
                   Text('Колір', style: Theme.of(context).textTheme.titleSmall),
@@ -69,22 +59,22 @@ class _TargetDetailPageState extends ConsumerState<TargetDetailPage> {
                     spacing: 10,
                     runSpacing: 10,
                     children: _presets
-                        .map((preset) {
-                          return Tooltip(
+                        .map(
+                          (preset) => Tooltip(
                             message: preset.label,
                             child: IconButton.filledTonal(
-                              onPressed: connectedDevices == 0
-                                  ? null
-                                  : () => unawaited(
+                              onPressed: connected
+                                  ? () => unawaited(
                                       _dispatch(SetColor(preset.color)),
-                                    ),
+                                    )
+                                  : null,
                               icon: Icon(
                                 Icons.circle,
                                 color: colorFromRgb(preset.color),
                               ),
                             ),
-                          );
-                        })
+                          ),
+                        )
                         .toList(growable: false),
                   ),
                   const SizedBox(height: 20),
@@ -101,15 +91,15 @@ class _TargetDetailPageState extends ConsumerState<TargetDetailPage> {
                   Slider(
                     value: brightness,
                     divisions: 100,
-                    onChanged: connectedDevices == 0
-                        ? null
-                        : (value) => setState(() => _previewBrightness = value),
-                    onChangeEnd: connectedDevices == 0
-                        ? null
-                        : (value) {
+                    onChanged: connected
+                        ? (value) => setState(() => _previewBrightness = value)
+                        : null,
+                    onChangeEnd: connected
+                        ? (value) {
                             setState(() => _previewBrightness = null);
                             unawaited(_dispatch(SetBrightness(value)));
-                          },
+                          }
+                        : null,
                   ),
                   Text(
                     'Переданий стан зберігається локально. BLE-відповідь не є підтвердженням, що стрічка фізично застосувала значення.',
@@ -119,26 +109,6 @@ class _TargetDetailPageState extends ConsumerState<TargetDetailPage> {
               ),
             ),
           ),
-          if (target.isGroup) ...<Widget>[
-            const SizedBox(height: 20),
-            Text('Учасники', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            ...target.memberDeviceIds.map((deviceId) {
-              final device = devices[deviceId];
-              if (device == null) {
-                return const ListTile(
-                  leading: Icon(Icons.link_off),
-                  title: Text('Недоступний девайс'),
-                  subtitle: Text('Потрібне повторне виявлення або relink.'),
-                );
-              }
-              return ListTile(
-                leading: Icon(deviceStatusIcon(device.status)),
-                title: Text(device.endpoint.displayName ?? 'Без назви'),
-                subtitle: Text(deviceStatusLabel(device.status)),
-              );
-            }),
-          ],
         ],
       ),
     );
@@ -146,14 +116,12 @@ class _TargetDetailPageState extends ConsumerState<TargetDetailPage> {
 
   Future<void> _dispatch(LightingCommand command) async {
     await ref
-        .read(lightingControlsProvider.notifier)
-        .dispatch(widget.target, command);
+        .read(deviceControlsProvider.notifier)
+        .dispatch(widget.appDeviceId, command);
   }
 
-  static String _singleDeviceStatus(DebugDevice? device) {
-    if (device == null) {
-      return 'Девайс недоступний';
-    }
+  static String _deviceStatus(DebugDevice? device) {
+    if (device == null) return 'Девайс недоступний';
     return deviceStatusLabel(device.status);
   }
 }
@@ -165,7 +133,7 @@ class _ColorPreset {
   final RgbColor color;
 }
 
-final List<_ColorPreset> _presets = <_ColorPreset>[
+final _presets = <_ColorPreset>[
   _ColorPreset('Червоний', RgbColor(255, 0, 0)),
   _ColorPreset('Помаранчевий', RgbColor(255, 96, 0)),
   _ColorPreset('Жовтий', RgbColor(255, 210, 0)),

@@ -138,7 +138,6 @@ final class MacroLightingIntent {
   MacroLightingIntent({
     required this.macroId,
     required this.bindingId,
-    required this.targetKind,
     required this.targetId,
     required this.parameter,
     required this.value,
@@ -148,7 +147,6 @@ final class MacroLightingIntent {
 
   final String macroId;
   final String bindingId;
-  final MacroTargetKind targetKind;
   final String targetId;
   final MacroTargetParameter parameter;
   final TriggerValue value;
@@ -290,7 +288,6 @@ final class MacroRuntime {
         MacroLightingIntent(
           macroId: graph.id,
           bindingId: binding.id,
-          targetKind: binding.targetKind,
           targetId: binding.targetId,
           parameter: binding.parameter,
           value: event.primaryValue,

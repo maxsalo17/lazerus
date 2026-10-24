@@ -17,7 +17,8 @@ where native macOS behavior is required.
 
 - Keep the app fully functional without an account, backend, cloud service, or
   internet connection.
-- Support multiple lighting controllers independently and in logical groups.
+- Support multiple lighting controllers independently and through direct-device
+  Macro automation.
 - Treat BLE as the first implemented transport, while keeping transport
   selection separate from device-protocol selection so later USB, Wi-Fi, HTTP,
   MQTT, or other transports do not require a domain-model rewrite.
@@ -53,8 +54,7 @@ lib/
     persistence/       # Local database, migrations and repositories
     diagnostics/       # Metrics and safe diagnostic export
     platform/          # Narrow platform abstractions and channels
-  features/            # Dashboard, devices, groups, presets, scenes,
-                         # pipelines and settings UI/controllers
+  features/            # Devices, calibration, macros, diagnostics and settings UI
   shared/              # Reusable presentation-only utilities and widgets
 ```
 
@@ -101,14 +101,12 @@ lib/
   reverse engineering must be marked unverified until physical validation.
 - Do not expose arbitrary raw GATT writes in normal user-facing controls.
 
-## Lighting, scenes, and pipelines
+## Lighting, macros, and pipelines
 
-- A device has exactly one resolved desired output at any time. Preserve this
-  arbitration order unless it is deliberately changed and documented:
-  `manual temporary override` > `high-priority active scene` > `active
-  pipeline` > `active group mode` > `device default`.
-- Make ties deterministic and retain the winning source so the UI can explain
-  why the device has its current state.
+- A device has exactly one resolved desired output at any time. An active Macro
+  input takes priority over the same manual device parameter; otherwise the
+  device's manual value is used. Make this deterministic and retain the winning
+  source so the UI can explain why the device has its current state.
 - A device must not receive conflicting native-effect and app-streamed
   animation commands concurrently.
 - Animation evaluation must be deterministic for fixed inputs, timestamp, and
@@ -118,16 +116,16 @@ lib/
   Stateful feedback must use explicit delay/state semantics.
 - Persist pipeline definitions separately from runtime execution state. Pipelines
   must run without their editor open.
-- Validate scene targets and capabilities before activation, resolve conflicts,
-  and follow an explicit deactivation policy.
+- Validate direct Macro targets and capabilities before start, resolve
+  conflicts, and follow the explicit stop/restoration policy.
 
 ## Persistence and platform integration
 
 - Store configuration locally in a structured database (the specification
   proposes SQLite via Drift), with typed models, migrations, schema versions,
   transactions, and referential integrity.
-- Device deletion must not silently corrupt groups, presets, scenes, or
-  pipelines. Preserve broken references in a detectable, repairable form.
+- Device deletion must not silently corrupt presets, macros or pipelines.
+  Preserve broken references in a detectable, repairable form.
 - Imports/exports are versioned JSON and require schema validation, compatibility
   checks, conflict handling, duplicate handling, and hardware-reference
   remapping. BLE identifiers are not portable across platforms.
@@ -159,7 +157,7 @@ protocol is uncertain, verify it before committing to an integration.
 ## Tests and definition of done
 
 Critical logic requires automated coverage: color/brightness calculations,
-animation evaluation, graph validation and execution, group membership,
+animation evaluation, graph validation and execution,
 arbitration, scheduler decisions, protocol encoding, serialization, and database
 migrations. Use mocked BLE transports for connection, recovery, write ordering,
 frame dropping, and characteristic-missing cases. Add integration and lifecycle
@@ -179,7 +177,7 @@ Keep these documents current as implementation begins:
 - `docs/BLE_PROTOCOLS.md`
 - `docs/DATA_MODELS.md`
 - `docs/PIPELINE_ENGINE.md`
-- `docs/SCENE_SYSTEM.md`
+- `docs/MACRO_SYSTEM.md`
 - `docs/PERFORMANCE.md`
 - `docs/TESTING.md`
 - `docs/ROADMAP.md`

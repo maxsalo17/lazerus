@@ -7,8 +7,8 @@ import 'package:uuid/uuid.dart';
 
 /// Resolves a mutable transport locator to Lazerus' local device identity.
 ///
-/// A BLE identifier is retained only as a discovery/relink binding. Group
-/// membership uses the returned application-generated UUID instead.
+/// A BLE identifier is retained only as a discovery/relink binding. The
+/// returned application-generated UUID identifies persisted device data.
 abstract interface class DeviceIdentityRepository {
   Future<String> resolve(
     TransportEndpoint endpoint, {

@@ -77,10 +77,10 @@ protocol; hardware validation is still required.
 For the active application session, the Lotus adapter merges every successfully
 accepted power, color, or brightness command into a partial protocol-side
 `lastKnownState`. A recognized inbound E1 packet updates the same snapshot.
-The app separately retains desired colour for group and individual controls, so
-a per-device calibration does not make a group card display the adjusted
-transport colour. Neither snapshot claims a physical readback. The session
-snapshot is in memory only and is discarded when its protocol session closes.
+The app separately retains the desired colour, so a per-device calibration does
+not make device UI display the adjusted transport colour. Neither snapshot
+claims a physical readback. The session snapshot is in memory only and is
+discarded when its protocol session closes.
 
 The application displays the matching reason, connection state,
 capability evidence, GATT-write result, and basic power/RGB/brightness actions.
@@ -127,12 +127,12 @@ hardware validation work.
   E1-shaped decode is diagnostics-only and explicitly best-effort.
 - Controller state confirmation or protocol acknowledgements.
 - Complete device persistence/relinking, reconnect policy, or centralized
-  command scheduling. The app has only a narrow local identity binding,
-  custom-group store, and control-level drag coalescer behind repositories;
-  it is not the planned Drift/SQLite
-  device database.
-- Effect-speed, warm/cold-white, scenes, microphone, timers, sensors, reset,
-  and any destructive command.
+  command scheduling. The app has only a narrow local identity binding and
+  per-device manual-control drag coalescer behind repositories; it is not the
+  planned Drift/SQLite device database.
+- Effect-speed, warm/cold-white, timers, sensors, reset, and any destructive
+  command. Microphone capture exists for Macros, but physical capture and
+  microphone-to-light validation remain pending.
 - Measured maximum update rate, multi-device synchronization, or reconnect
   behavior.
 

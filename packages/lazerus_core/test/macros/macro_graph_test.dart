@@ -61,7 +61,7 @@ void main() {
       expect(restored.editorPositions['node-1']?.x, 12);
     });
 
-    test('rejects unknown enum values and future schema versions', () {
+    test('rejects future schema versions', () {
       expect(
         () => MacroGraph.fromJson(<String, Object?>{
           'schemaVersion': currentMacroGraphSchemaVersion + 1,
@@ -69,16 +69,6 @@ void main() {
           'name': 'Macro',
           'nodes': <Object?>[],
           'edges': <Object?>[],
-        }),
-        throwsFormatException,
-      );
-      expect(
-        () => MacroTargetBinding.fromJson(<String, Object?>{
-          'id': 'binding-1',
-          'sourcePortId': 'out',
-          'targetKind': 'not-a-target',
-          'targetId': 'device-1',
-          'parameter': 'brightness',
         }),
         throwsFormatException,
       );
@@ -112,19 +102,6 @@ void main() {
         throwsArgumentError,
       );
     });
-
-    test('scene macro references have value equality', () {
-      final references = <SceneMacroReference>{
-        SceneMacroReference(macroId: 'macro-1'),
-        SceneMacroReference(macroId: 'macro-1'),
-      };
-
-      expect(references, hasLength(1));
-      expect(
-        SceneMacroReference.fromJson(<String, Object?>{'macroId': 'macro-1'}),
-        SceneMacroReference(macroId: 'macro-1'),
-      );
-    });
   });
 
   group('MacroGraphValidator', () {
@@ -154,7 +131,6 @@ void main() {
           MacroTargetBinding(
             id: 'color-binding',
             sourcePortId: 'hsv-out',
-            targetKind: MacroTargetKind.device,
             targetId: 'device-1',
             parameter: MacroTargetParameter.color,
           ),
@@ -196,7 +172,6 @@ void main() {
           MacroTargetBinding(
             id: 'binding-1',
             sourcePortId: 'level',
-            targetKind: MacroTargetKind.device,
             targetId: 'missing-device',
             parameter: MacroTargetParameter.brightness,
           ),
@@ -291,7 +266,6 @@ MacroGraph _validGraph() => MacroGraph(
     MacroTargetBinding(
       id: 'binding-1',
       sourcePortId: 'level-out',
-      targetKind: MacroTargetKind.device,
       targetId: 'device-1',
       parameter: MacroTargetParameter.brightness,
     ),

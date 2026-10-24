@@ -15,7 +15,7 @@ import 'macro_patcher_canvas.dart';
 import 'node_modules/macro_editor_node_module.dart';
 import 'node_modules/macro_editor_node_registry.dart';
 
-/// Edits one versioned Scene Macro graph.
+/// Edits one versioned Macro graph.
 ///
 /// This page deliberately owns only generic graph lifecycle, persistence and
 /// connection validation. Concrete trigger, modifier and target behaviour is
@@ -53,7 +53,10 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
   void initState() {
     super.initState();
     _nodeModules = createMacroEditorNodeModuleRegistry();
-    _draft = _nodeModules.migrateLegacyBindings(widget.macro ?? _nodeModules.createStarterGraph(newId: _newId), newId: _newId);
+    _draft = _nodeModules.migrateLegacyBindings(
+      widget.macro ?? _nodeModules.createStarterGraph(newId: _newId),
+      newId: _newId,
+    );
     _nameController = TextEditingController(text: _draft.name);
     _selectedNodeId = _draft.nodes.firstOrNull?.id;
   }
@@ -70,7 +73,8 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
     final runtimeState = ref.watch(macroRuntimeSessionsProvider);
     final status = runtimeState.statusFor(_draft.id);
     final running =
-        status?.lifecycle == MacroRuntimeSessionLifecycle.running || status?.lifecycle == MacroRuntimeSessionLifecycle.starting;
+        status?.lifecycle == MacroRuntimeSessionLifecycle.running ||
+        status?.lifecycle == MacroRuntimeSessionLifecycle.starting;
     final editorEnabled = !_saving;
     final devicesState = ref.watch(debugDevicesProvider);
     final presentationState = MacroEditorNodePresentationState(
@@ -101,7 +105,12 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
               title: Text(_isNew ? 'Новий macro' : 'Macro editor'),
               actionsPadding: const EdgeInsets.symmetric(horizontal: 16),
               actions: <Widget>[
-                _RuntimeControl(status: status, enabled: !_saving, onStart: _start, onStop: _stop),
+                _RuntimeControl(
+                  status: status,
+                  enabled: !_saving,
+                  onStart: _start,
+                  onStop: _stop,
+                ),
                 const SizedBox(width: 8),
                 IconButton.filledTonal(
                   key: const Key('save-macro'),
@@ -120,7 +129,10 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
                     key: const Key('macro-name'),
                     controller: _nameController,
                     enabled: editorEnabled,
-                    decoration: const InputDecoration(labelText: 'Назва macro', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: 'Назва macro',
+                      border: OutlineInputBorder(),
+                    ),
                     textInputAction: TextInputAction.done,
                     onSubmitted: (_) => _save(),
                   ),
@@ -129,7 +141,12 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
                     mainAxisSize: MainAxisSize.min,
                     spacing: 8,
                     children: <Widget>[
-                      Flexible(child: Text('Patcher', style: Theme.of(context).textTheme.titleMedium)),
+                      Flexible(
+                        child: Text(
+                          'Patcher',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
                       const Tooltip(
                         message:
                             'Клікніть port, перемістіть курсор і клікніть інший port, щоб створити connection. Клік по підʼєднаному port відʼєднує wire для перепідключення.',
@@ -146,7 +163,9 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
                         SizedBox(
                           width: 228,
                           child: MacroEditorPalette(
-                            entries: _nodeModules.paletteEntries(presentationState),
+                            entries: _nodeModules.paletteEntries(
+                              presentationState,
+                            ),
                             enabled: editorEnabled,
                             onAdd: _addPaletteItem,
                           ),
@@ -156,10 +175,17 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
                           child: DragTarget<MacroEditorPaletteEntry>(
                             key: _patcherDropKey,
                             onWillAcceptWithDetails: (_) => editorEnabled,
-                            onAcceptWithDetails: (details) => _addPaletteItem(details.data, _dropPositionFor(details.offset)),
+                            onAcceptWithDetails: (details) => _addPaletteItem(
+                              details.data,
+                              _dropPositionFor(details.offset),
+                            ),
                             builder: (context, candidate, rejected) => Card(
                               clipBehavior: Clip.antiAlias,
-                              color: candidate.isNotEmpty ? Theme.of(context).colorScheme.primaryContainer : null,
+                              color: candidate.isNotEmpty
+                                  ? Theme.of(
+                                      context,
+                                    ).colorScheme.primaryContainer
+                                  : null,
                               child: MacroPatcherCanvas(
                                 graph: _graphDefinition,
                                 selectedNodeId: _selectedNodeId,
@@ -167,12 +193,22 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
                                 nodeTitleBuilder: _nodeModules.titleFor,
                                 nodeBodyBuilder: (context, node) => _nodeModules
                                     .moduleFor(node)
-                                    .buildCardBody(context, _nodeViewContext(node, presentationState)),
-                                nodeBodyHeight: (node) => _nodeModules.moduleFor(node).cardBodyHeight(node),
-                                onSelectionChanged: (nodeId) => setState(() => _selectedNodeId = nodeId),
+                                    .buildCardBody(
+                                      context,
+                                      _nodeViewContext(node, presentationState),
+                                    ),
+                                nodeBodyHeight: (node) => _nodeModules
+                                    .moduleFor(node)
+                                    .cardBodyHeight(node),
+                                onSelectionChanged: (nodeId) =>
+                                    setState(() => _selectedNodeId = nodeId),
                                 onNodeMove: editorEnabled ? _moveNode : null,
-                                onConnectionCreate: editorEnabled ? _connectPorts : null,
-                                onConnectionRemove: editorEnabled ? _removeEdge : null,
+                                onConnectionCreate: editorEnabled
+                                    ? _connectPorts
+                                    : null,
+                                onConnectionRemove: editorEnabled
+                                    ? _removeEdge
+                                    : null,
                               ),
                             ),
                           ),
@@ -182,12 +218,20 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
                   ),
                   const SizedBox(height: 20),
                   if (selectedNode == null)
-                    const _EditorHint(text: 'Оберіть вузол у patcher, щоб налаштувати його.')
+                    const _EditorHint(
+                      text: 'Оберіть вузол у patcher, щоб налаштувати його.',
+                    )
                   else
                     _nodeModules
                         .moduleFor(selectedNode)
-                        .buildInspector(context, _nodeViewContext(selectedNode, presentationState)),
-                  if (_error != null) ...<Widget>[const SizedBox(height: 16), _EditorError(message: _error!)],
+                        .buildInspector(
+                          context,
+                          _nodeViewContext(selectedNode, presentationState),
+                        ),
+                  if (_error != null) ...<Widget>[
+                    const SizedBox(height: 16),
+                    _EditorError(message: _error!),
+                  ],
                 ],
               ),
             ),
@@ -202,21 +246,29 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
     edges: _draft.edges,
     layouts: <String, MacroNodeLayout>{
       for (final entry in _draft.editorPositions.entries)
-        entry.key: MacroNodeLayout(position: Offset(entry.value.x, entry.value.y)),
+        entry.key: MacroNodeLayout(
+          position: Offset(entry.value.x, entry.value.y),
+        ),
     },
   );
 
-  MacroEditorNodeViewContext _nodeViewContext(MacroNode node, MacroEditorNodePresentationState presentationState) =>
-      MacroEditorNodeViewContext(
-        node: node,
-        state: presentationState,
-        replaceNode: _replaceNode,
-        removeNode: () => _removeNode(node.id),
-      );
+  MacroEditorNodeViewContext _nodeViewContext(
+    MacroNode node,
+    MacroEditorNodePresentationState presentationState,
+  ) => MacroEditorNodeViewContext(
+    node: node,
+    state: presentationState,
+    replaceNode: _replaceNode,
+    removeNode: () => _removeNode(node.id),
+  );
 
   bool get _hasLiveRuntime {
-    final lifecycle = ref.read(macroRuntimeSessionsProvider).statusFor(_draft.id)?.lifecycle;
-    return lifecycle == MacroRuntimeSessionLifecycle.running || lifecycle == MacroRuntimeSessionLifecycle.starting;
+    final lifecycle = ref
+        .read(macroRuntimeSessionsProvider)
+        .statusFor(_draft.id)
+        ?.lifecycle;
+    return lifecycle == MacroRuntimeSessionLifecycle.running ||
+        lifecycle == MacroRuntimeSessionLifecycle.starting;
   }
 
   /// Coalesces editor changes into one runtime definition replacement. The
@@ -226,7 +278,10 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
     _draftRevision++;
     if (!_hasLiveRuntime) return;
     _runtimeUpdateTimer?.cancel();
-    _runtimeUpdateTimer = Timer(_liveUpdateDebounce, () => unawaited(_applyLiveRuntimeUpdate()));
+    _runtimeUpdateTimer = Timer(
+      _liveUpdateDebounce,
+      () => unawaited(_applyLiveRuntimeUpdate()),
+    );
   }
 
   Future<void> _applyLiveRuntimeUpdate() async {
@@ -262,19 +317,28 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
   }
 
   Offset? _dropPositionFor(Offset globalPosition) {
-    final box = _patcherDropKey.currentContext?.findRenderObject() as RenderBox?;
+    final box =
+        _patcherDropKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return null;
     final local = box.globalToLocal(globalPosition);
-    return Offset((local.dx - 112).clamp(20, 1300).toDouble(), (local.dy - 22).clamp(20, 900).toDouble());
+    return Offset(
+      (local.dx - 112).clamp(20, 1300).toDouble(),
+      (local.dy - 22).clamp(20, 900).toDouble(),
+    );
   }
 
   void _addPaletteItem(MacroEditorPaletteEntry entry, [Offset? position]) {
     final node = _nodeModules.createNode(entry, newId: _newId);
     if (node == null) {
-      _showError('Не вдалося створити node. Оновіть дані девайса або перевірте його capabilities.');
+      _showError(
+        'Не вдалося створити node. Оновіть дані девайса або перевірте його capabilities.',
+      );
       return;
     }
-    final fallbackPosition = Offset(56 + ((_draft.nodes.length % 3) * 250), 80 + ((_draft.nodes.length ~/ 3) * 220));
+    final fallbackPosition = Offset(
+      56 + ((_draft.nodes.length % 3) * 250),
+      80 + ((_draft.nodes.length ~/ 3) * 220),
+    );
     final nodePosition = position ?? fallbackPosition;
     setState(() {
       _draft = _synchronizeBindings(
@@ -282,7 +346,10 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
           nodes: <MacroNode>[..._draft.nodes, node],
           editorPositions: <String, MacroEditorPosition>{
             ..._draft.editorPositions,
-            node.id: MacroEditorPosition(x: nodePosition.dx, y: nodePosition.dy),
+            node.id: MacroEditorPosition(
+              x: nodePosition.dx,
+              y: nodePosition.dy,
+            ),
           },
         ),
       );
@@ -307,17 +374,26 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
     final original = _nodeById(replacement.id);
     if (original == null) return;
     final originalPortIds = original.ports.map((port) => port.id).toSet();
-    final nodes = _draft.nodes.map((node) => node.id == replacement.id ? replacement : node).toList(growable: false);
-    final currentPortIds = nodes.expand((node) => node.ports).map((port) => port.id).toSet();
+    final nodes = _draft.nodes
+        .map((node) => node.id == replacement.id ? replacement : node)
+        .toList(growable: false);
+    final currentPortIds = nodes
+        .expand((node) => node.ports)
+        .map((port) => port.id)
+        .toSet();
     final edges = _draft.edges
         .where(
           (edge) =>
-              (!originalPortIds.contains(edge.fromPortId) && !originalPortIds.contains(edge.toPortId)) ||
-              (currentPortIds.contains(edge.fromPortId) && currentPortIds.contains(edge.toPortId)),
+              (!originalPortIds.contains(edge.fromPortId) &&
+                  !originalPortIds.contains(edge.toPortId)) ||
+              (currentPortIds.contains(edge.fromPortId) &&
+                  currentPortIds.contains(edge.toPortId)),
         )
         .toList(growable: false);
     setState(() {
-      _draft = _synchronizeBindings(_draft.copyWith(nodes: nodes, edges: edges));
+      _draft = _synchronizeBindings(
+        _draft.copyWith(nodes: nodes, edges: edges),
+      );
       _error = null;
     });
     _markRuntimeDefinitionChanged();
@@ -330,7 +406,8 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
       _showError('Один із port-ів більше не існує.');
       return;
     }
-    if (source.direction != MacroPortDirection.output || destination.direction != MacroPortDirection.input) {
+    if (source.direction != MacroPortDirection.output ||
+        destination.direction != MacroPortDirection.input) {
       _showError('Connection має йти з output до input.');
       return;
     }
@@ -338,10 +415,13 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
       _showError('Типи port-ів не сумісні.');
       return;
     }
-    if (_draft.edges.any((edge) => edge.fromPortId == fromPortId && edge.toPortId == toPortId)) {
+    if (_draft.edges.any(
+      (edge) => edge.fromPortId == fromPortId && edge.toPortId == toPortId,
+    )) {
       return;
     }
-    if (!destination.acceptsMultipleInputs && _draft.edges.any((edge) => edge.toPortId == toPortId)) {
+    if (!destination.acceptsMultipleInputs &&
+        _draft.edges.any((edge) => edge.toPortId == toPortId)) {
       _showError('Цей input вже має connection.');
       return;
     }
@@ -368,7 +448,9 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
 
   void _removeEdge(String edgeId) {
     setState(() {
-      _draft = _synchronizeBindings(_draft.copyWith(edges: _draft.edges.where((edge) => edge.id != edgeId)));
+      _draft = _synchronizeBindings(
+        _draft.copyWith(edges: _draft.edges.where((edge) => edge.id != edgeId)),
+      );
     });
     _markRuntimeDefinitionChanged();
   }
@@ -377,7 +459,10 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
     _draft = _draft.copyWith(
       editorPositions: <String, MacroEditorPosition>{
         ..._draft.editorPositions,
-        nodeId: MacroEditorPosition(x: layout.position.dx, y: layout.position.dy),
+        nodeId: MacroEditorPosition(
+          x: layout.position.dx,
+          y: layout.position.dy,
+        ),
       },
     );
   });
@@ -387,11 +472,16 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
     if (node == null) return;
     final portIds = node.ports.map((port) => port.id).toSet();
     setState(() {
-      final positions = <String, MacroEditorPosition>{..._draft.editorPositions}..remove(nodeId);
+      final positions = <String, MacroEditorPosition>{..._draft.editorPositions}
+        ..remove(nodeId);
       _draft = _synchronizeBindings(
         _draft.copyWith(
           nodes: _draft.nodes.where((item) => item.id != nodeId),
-          edges: _draft.edges.where((edge) => !portIds.contains(edge.fromPortId) && !portIds.contains(edge.toPortId)),
+          edges: _draft.edges.where(
+            (edge) =>
+                !portIds.contains(edge.fromPortId) &&
+                !portIds.contains(edge.toPortId),
+          ),
           editorPositions: positions,
         ),
       );
@@ -400,7 +490,8 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
     _markRuntimeDefinitionChanged();
   }
 
-  MacroGraph _synchronizeBindings(MacroGraph graph) => _nodeModules.synchronizeBindings(graph);
+  MacroGraph _synchronizeBindings(MacroGraph graph) =>
+      _nodeModules.synchronizeBindings(graph);
 
   Future<void> _save() async {
     final saved = await _persistDraft();
@@ -427,7 +518,9 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
     setState(() {
       _saving = false;
       if (!saved) {
-        _error = ref.read(macroLibraryProvider).error ?? 'Не вдалося зберегти macro.';
+        _error =
+            ref.read(macroLibraryProvider).error ??
+            'Не вдалося зберегти macro.';
       }
     });
     return saved;
@@ -463,7 +556,12 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
 }
 
 class _RuntimeControl extends StatelessWidget {
-  const _RuntimeControl({required this.status, required this.enabled, required this.onStart, required this.onStop});
+  const _RuntimeControl({
+    required this.status,
+    required this.enabled,
+    required this.onStart,
+    required this.onStop,
+  });
 
   final MacroRuntimeSessionStatus? status;
   final bool enabled;
@@ -473,7 +571,9 @@ class _RuntimeControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lifecycle = status?.lifecycle;
-    final running = lifecycle == MacroRuntimeSessionLifecycle.running || lifecycle == MacroRuntimeSessionLifecycle.starting;
+    final running =
+        lifecycle == MacroRuntimeSessionLifecycle.running ||
+        lifecycle == MacroRuntimeSessionLifecycle.starting;
     final label = switch (lifecycle) {
       MacroRuntimeSessionLifecycle.starting => 'Starting',
       MacroRuntimeSessionLifecycle.invalid => 'Needs repair',

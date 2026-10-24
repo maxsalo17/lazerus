@@ -11,7 +11,7 @@ import '../../../core/macros/persistence/macro_file_storage.dart';
 /// Persistence boundary for the reusable macro library.
 ///
 /// Macro definitions are stored in the application-support directory, outside
-/// the app bundle and independent of Scene documents. Tests can override this
+/// the app bundle. Tests can override this
 /// provider with an [InMemoryMacroRepository].
 final macroRepositoryProvider = FutureProvider<MacroRepository>((ref) async {
   final applicationSupportDirectory = await getApplicationSupportDirectory();
@@ -27,7 +27,7 @@ final macroLibraryProvider =
       MacroLibraryController.new,
     );
 
-/// The persisted macro definitions currently available to Scenes and editors.
+/// The persisted macro definitions currently available to editors and runtime.
 ///
 /// An invalid graph remains in this collection: missing modules and stale
 /// references are repairable saved configuration, not a reason to delete user

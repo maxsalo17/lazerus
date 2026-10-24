@@ -5,76 +5,74 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lazerus_core/lazerus_core.dart';
 
 import '../../debug/application/debug_devices_controller.dart';
-import '../../groups/application/group_targets.dart';
-import '../application/lighting_controls_controller.dart';
+import '../application/device_controls_controller.dart';
 import 'color_utils.dart';
 import 'hold_value_control.dart';
 
-class CompactControlCard extends ConsumerStatefulWidget {
-  CompactControlCard({
+/// Compact controls for one physical device.
+///
+/// It is reused in the Macro editor only for a device target node; routed
+/// inputs disable the matching manual controls after their first value.
+class DeviceControlCard extends ConsumerStatefulWidget {
+  DeviceControlCard({
     super.key,
-    required this.target,
+    required this.appDeviceId,
+    required this.deviceName,
     this.onOpen,
     Iterable<LightingFeature> inputDrivenFeatures = const <LightingFeature>{},
     this.inputDrivenMessage,
-  }) : inputDrivenFeatures = Set<LightingFeature>.unmodifiable(inputDrivenFeatures);
+  }) : inputDrivenFeatures = Set<LightingFeature>.unmodifiable(
+         inputDrivenFeatures,
+       );
 
-  final LightingTarget target;
+  final String appDeviceId;
+  final String deviceName;
   final VoidCallback? onOpen;
-
-  /// Parameters currently owned by a higher-priority live input. The normal
-  /// Controls view leaves this empty; the Macro editor uses it after a routed
-  /// input has emitted at least one value.
   final Set<LightingFeature> inputDrivenFeatures;
   final String? inputDrivenMessage;
 
   @override
-  ConsumerState<CompactControlCard> createState() => _CompactControlCardState();
+  ConsumerState<DeviceControlCard> createState() => _DeviceControlCardState();
 }
 
-class _CompactControlCardState extends ConsumerState<CompactControlCard> {
+class _DeviceControlCardState extends ConsumerState<DeviceControlCard> {
   double? _previewBrightness;
   RgbColor? _previewColor;
   var _suppressCardOpen = false;
 
   @override
-  void didUpdateWidget(covariant CompactControlCard oldWidget) {
+  void didUpdateWidget(covariant DeviceControlCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final gainedInputOwner = widget.inputDrivenFeatures.any((feature) => !oldWidget.inputDrivenFeatures.contains(feature));
+    final gainedInputOwner = widget.inputDrivenFeatures.any(
+      (feature) => !oldWidget.inputDrivenFeatures.contains(feature),
+    );
     if (!gainedInputOwner) return;
 
-    // A drag can have one sampled command waiting in the shared ticker. Once
-    // the macro has emitted for a parameter, discard that manual preview so a
-    // delayed write cannot overtake the input-owned state.
     _previewBrightness = null;
     _previewColor = null;
-    ref.read(lightingControlsProvider.notifier).cancelReplaceable(widget.target.id);
+    ref
+        .read(deviceControlsProvider.notifier)
+        .cancelReplaceable(widget.appDeviceId);
   }
 
   @override
   Widget build(BuildContext context) {
-    final target = widget.target;
-    final devices = ref.watch(debugDevicesProvider).devices;
-    final controls = ref.read(lightingControlsProvider.notifier);
-    final state = controls.stateFor(target);
+    final device = ref.watch(debugDevicesProvider).devices[widget.appDeviceId];
+    final controls = ref.read(deviceControlsProvider.notifier);
+    final state = controls.stateFor(widget.appDeviceId);
     final brightness = _previewBrightness ?? state.brightness;
     final color = _previewColor ?? state.color;
-    final swatchColors = state.displayColors.isEmpty
-        ? <RgbColor>[color, color]
-        : state.displayColors.length == 1
-        ? <RgbColor>[state.displayColors.single, state.displayColors.single]
-        : state.displayColors;
-    final connectedCount = target.memberDeviceIds
-        .map((deviceId) => devices[deviceId])
-        .whereType<DebugDevice>()
-        .where((device) => device.status == DebugDeviceConnectionStatus.connected)
-        .length;
-    final isEnabled = connectedCount > 0;
+    final isEnabled = device?.status == DebugDeviceConnectionStatus.connected;
     final isOn = state.power ?? false;
-    final powerDriven = widget.inputDrivenFeatures.contains(LightingFeature.power);
+    final powerDriven = widget.inputDrivenFeatures.contains(
+      LightingFeature.power,
+    );
     final colorDriven =
-        widget.inputDrivenFeatures.contains(LightingFeature.rgb) || widget.inputDrivenFeatures.contains(LightingFeature.rgbw);
-    final brightnessDriven = widget.inputDrivenFeatures.contains(LightingFeature.brightness);
+        widget.inputDrivenFeatures.contains(LightingFeature.rgb) ||
+        widget.inputDrivenFeatures.contains(LightingFeature.rgbw);
+    final brightnessDriven = widget.inputDrivenFeatures.contains(
+      LightingFeature.brightness,
+    );
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -99,14 +97,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                     width: 12,
                     height: 36,
                     decoration: BoxDecoration(
-                      color: target.isGroup ? null : colorFromRgb(color),
-                      gradient: target.isGroup
-                          ? LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: swatchColors.map(colorFromRgb).toList(growable: false),
-                            )
-                          : null,
+                      color: colorFromRgb(color),
                       borderRadius: BorderRadius.circular(99),
                     ),
                   ),
@@ -116,15 +107,13 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          target.name,
+                          widget.deviceName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
                         Text(
-                          target.isGroup
-                              ? '$connectedCount з ${target.memberDeviceIds.length} підключено'
-                              : _deviceConnectionText(devices[target.id]),
+                          _deviceConnectionText(device),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -133,14 +122,18 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                   if (isOn)
                     IconButton.filled(
                       tooltip: 'Вимкнути',
-                      onPressed: isEnabled && !powerDriven ? () => unawaited(_dispatch(SetPower(false))) : null,
-                      icon: Icon(Icons.power_settings_new),
+                      onPressed: isEnabled && !powerDriven
+                          ? () => unawaited(_dispatch(SetPower(false)))
+                          : null,
+                      icon: const Icon(Icons.power_settings_new),
                     )
                   else
                     IconButton.outlined(
                       tooltip: 'Увімкнути',
-                      onPressed: isEnabled && !powerDriven ? () => unawaited(_dispatch(SetPower(true))) : null,
-                      icon: Icon(Icons.power_settings_new),
+                      onPressed: isEnabled && !powerDriven
+                          ? () => unawaited(_dispatch(SetPower(true)))
+                          : null,
+                      icon: const Icon(Icons.power_settings_new),
                     ),
                 ],
               ),
@@ -148,7 +141,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
               Row(
                 children: <Widget>[
                   HoldValueControl(
-                    key: Key('${target.id}-hold-color'),
+                    key: Key('${widget.appDeviceId}-hold-color'),
                     kind: HoldValueKind.hue,
                     value: lotusHueValueFor(color),
                     label: 'Колір',
@@ -159,20 +152,30 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                     onPreview: (value) {
                       final selected = lotusHueColor(value);
                       setState(() => _previewColor = selected);
-                      controls.queueReplaceable(target, SetColor(selected));
+                      controls.queueReplaceable(
+                        operationId: widget.appDeviceId,
+                        appDeviceIds: <String>{widget.appDeviceId},
+                        command: SetColor(selected),
+                      );
                     },
                     onCommit: isEnabled
                         ? (value) {
                             final selected = lotusHueColor(value);
                             setState(() => _previewColor = null);
-                            controls.queueReplaceable(target, SetColor(selected));
-                            unawaited(controls.flushReplaceable(target.id));
+                            controls.queueReplaceable(
+                              operationId: widget.appDeviceId,
+                              appDeviceIds: <String>{widget.appDeviceId},
+                              command: SetColor(selected),
+                            );
+                            unawaited(
+                              controls.flushReplaceable(widget.appDeviceId),
+                            );
                           }
                         : (_) => setState(() => _previewColor = null),
                   ),
                   const SizedBox(width: 8),
                   HoldValueControl(
-                    key: Key('${target.id}-hold-brightness'),
+                    key: Key('${widget.appDeviceId}-hold-brightness'),
                     kind: HoldValueKind.brightness,
                     value: brightness,
                     label: '${(brightness * 100).round()}%',
@@ -182,23 +185,38 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
                     onInteractionEnd: _clearDragOpenSuppression,
                     onPreview: (value) {
                       setState(() => _previewBrightness = value);
-                      controls.queueReplaceable(target, SetBrightness(value));
+                      controls.queueReplaceable(
+                        operationId: widget.appDeviceId,
+                        appDeviceIds: <String>{widget.appDeviceId},
+                        command: SetBrightness(value),
+                      );
                     },
                     onCommit: isEnabled
                         ? (value) {
                             setState(() => _previewBrightness = null);
-                            controls.queueReplaceable(target, SetBrightness(value));
-                            unawaited(controls.flushReplaceable(target.id));
+                            controls.queueReplaceable(
+                              operationId: widget.appDeviceId,
+                              appDeviceIds: <String>{widget.appDeviceId},
+                              command: SetBrightness(value),
+                            );
+                            unawaited(
+                              controls.flushReplaceable(widget.appDeviceId),
+                            );
                           }
                         : (_) => setState(() => _previewBrightness = null),
                   ),
                   const Spacer(),
-                  if (widget.onOpen != null) const Icon(Icons.open_in_new, size: 18),
+                  if (widget.onOpen != null)
+                    const Icon(Icons.open_in_new, size: 18),
                 ],
               ),
-              if (widget.inputDrivenFeatures.isNotEmpty && widget.inputDrivenMessage != null) ...<Widget>[
+              if (widget.inputDrivenFeatures.isNotEmpty &&
+                  widget.inputDrivenMessage != null) ...<Widget>[
                 const SizedBox(height: 8),
-                Text(widget.inputDrivenMessage!, style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  widget.inputDrivenMessage!,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ],
           ),
@@ -208,7 +226,9 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
   }
 
   Future<void> _dispatch(LightingCommand command) async {
-    await ref.read(lightingControlsProvider.notifier).dispatch(widget.target, command);
+    await ref
+        .read(deviceControlsProvider.notifier)
+        .dispatch(widget.appDeviceId, command);
   }
 
   void _suppressOpenForDrag() {
@@ -216,9 +236,6 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
   }
 
   void _clearDragOpenSuppression() {
-    // InkWell's tap callback for the same pointer is delivered after the
-    // Listener receives pointer-up. Clear on the next event turn so it is
-    // suppressed, but a later ordinary card tap still opens details.
     scheduleMicrotask(() {
       if (mounted) {
         _suppressCardOpen = false;
@@ -227,9 +244,7 @@ class _CompactControlCardState extends ConsumerState<CompactControlCard> {
   }
 
   static String _deviceConnectionText(DebugDevice? device) {
-    if (device == null) {
-      return 'Недоступний';
-    }
+    if (device == null) return 'Недоступний';
     return switch (device.status) {
       DebugDeviceConnectionStatus.connected => 'Підключено',
       DebugDeviceConnectionStatus.connecting => 'Підключення…',

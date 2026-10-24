@@ -110,7 +110,6 @@ void main() {
         MacroLightingIntent(
           macroId: 'macro',
           bindingId: 'color',
-          targetKind: MacroTargetKind.device,
           targetId: 'device-a',
           parameter: MacroTargetParameter.color,
           value: TriggerHsvValue(hue: 0, saturation: 1, value: 1),
@@ -142,7 +141,6 @@ void main() {
         MacroTargetBinding(
           id: 'brightness-binding',
           sourcePortId: 'source.level',
-          targetKind: MacroTargetKind.device,
           targetId: 'device-a',
           parameter: MacroTargetParameter.brightness,
         ),
@@ -166,7 +164,6 @@ MacroLightingIntent _brightnessIntent(double value, {required int sequence}) =>
     MacroLightingIntent(
       macroId: 'macro',
       bindingId: 'brightness',
-      targetKind: MacroTargetKind.device,
       targetId: 'device-a',
       parameter: MacroTargetParameter.brightness,
       value: TriggerLevelValue(value),
@@ -180,10 +177,7 @@ final class _Resolver implements MacroLightingTargetResolver {
   final Set<String> deviceIds;
 
   @override
-  Iterable<String> resolve({
-    required MacroTargetKind targetKind,
-    required String targetId,
-  }) => deviceIds;
+  Iterable<String> resolve(String targetId) => deviceIds;
 }
 
 final class _BlockingGateway implements MacroLightingDeviceGateway {

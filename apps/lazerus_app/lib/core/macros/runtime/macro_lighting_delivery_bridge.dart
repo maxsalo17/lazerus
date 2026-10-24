@@ -5,16 +5,10 @@ import 'dart:math' as math;
 import 'package:lazerus_core/lazerus_core.dart';
 
 import '../../../features/debug/application/debug_devices_controller.dart';
-import '../../../features/groups/application/group_targets.dart';
 
-/// Resolves saved macro target references against the app's current devices
-/// and derived/custom groups.
-///
-/// Resolution intentionally happens for every [MacroLightingIntent]. A saved
-/// group is only configuration; its available members can change while a macro
-/// is running.
+/// Resolves saved macro device references against the app's current devices.
 abstract interface class MacroLightingTargetResolver {
-  Iterable<String> resolve({required MacroTargetKind targetKind, required String targetId});
+  Iterable<String> resolve(String targetId);
 }
 
 /// Narrow application boundary used by [MacroLightingDeliveryBridge].
@@ -38,38 +32,31 @@ abstract interface class MacroLightingDeviceGateway {
 
   /// Requests a transport write. A returned [CommandOutcome.transmitted] only
   /// reports the transport boundary; it is not physical-device confirmation.
-  Future<CommandResult> dispatch(String appDeviceId, ApplyLightingState command);
+  Future<CommandResult> dispatch(
+    String appDeviceId,
+    ApplyLightingState command,
+  );
 }
 
-/// Resolves macro references against the current Debug Devices state and the
-/// current derived protocol/custom group targets.
+/// Resolves macro references against the current Debug Devices state.
 ///
-/// The two getters keep this adapter UI-free while allowing a composition root
-/// to supply fresh Riverpod state for every intent. A stale saved group or
-/// device reference simply resolves to no live targets and is reported as a
-/// dropped update by the bridge.
-final class DebugMacroLightingTargetResolver implements MacroLightingTargetResolver {
+/// The getter keeps this adapter UI-free while allowing a composition root to
+/// supply fresh Riverpod state for every intent. A stale device reference
+/// resolves to no live target and is reported as a dropped update by the bridge.
+final class DebugMacroLightingTargetResolver
+    implements MacroLightingTargetResolver {
   DebugMacroLightingTargetResolver({
     required DebugModuleState Function() currentDevices,
-    required Iterable<LightingTarget> Function() currentGroups,
-  }) : _currentDevices = currentDevices,
-       _currentGroups = currentGroups;
+  }) : _currentDevices = currentDevices;
 
   final DebugModuleState Function() _currentDevices;
-  final Iterable<LightingTarget> Function() _currentGroups;
 
   @override
-  Iterable<String> resolve({required MacroTargetKind targetKind, required String targetId}) {
+  Iterable<String> resolve(String targetId) {
     final devices = _currentDevices().devices;
-    return switch (targetKind) {
-      MacroTargetKind.device => devices.containsKey(targetId) ? <String>{targetId} : const <String>{},
-      MacroTargetKind.group =>
-        _currentGroups()
-            .where((group) => group.id == targetId)
-            .expand((group) => group.memberDeviceIds)
-            .where(devices.containsKey)
-            .toSet(),
-    };
+    return devices.containsKey(targetId)
+        ? <String>{targetId}
+        : const <String>{};
   }
 }
 
@@ -79,7 +66,8 @@ final class DebugMacroLightingTargetResolver implements MacroLightingTargetResol
 /// command path. The duplicate boundary is intentional: macro requests can
 /// wait behind an in-flight write while a device disconnects or changes its
 /// profile.
-final class DebugMacroLightingDeviceGateway implements MacroLightingDeviceGateway {
+final class DebugMacroLightingDeviceGateway
+    implements MacroLightingDeviceGateway {
   DebugMacroLightingDeviceGateway({
     required DebugModuleState Function() currentDevices,
     required DebugDevicesController devicesController,
@@ -90,7 +78,8 @@ final class DebugMacroLightingDeviceGateway implements MacroLightingDeviceGatewa
   final DebugDevicesController _devicesController;
 
   @override
-  DesiredLightingState? currentDesiredState(String appDeviceId) => _currentDevices().devices[appDeviceId]?.lastKnownState;
+  DesiredLightingState? currentDesiredState(String appDeviceId) =>
+      _currentDevices().devices[appDeviceId]?.lastKnownState;
 
   @override
   bool canDispatch(String appDeviceId, DesiredLightingState state) {
@@ -102,27 +91,50 @@ final class DebugMacroLightingDeviceGateway implements MacroLightingDeviceGatewa
       return false;
     }
     final device = current.devices[appDeviceId];
-    if (device == null || device.status != DebugDeviceConnectionStatus.connected) {
+    if (device == null ||
+        device.status != DebugDeviceConnectionStatus.connected) {
       return false;
     }
     final capabilities = device.capabilities;
     if (capabilities == null) {
       return false;
     }
-    return (state.power == null || capabilities.supports(LightingFeature.power, allowInferred: true)) &&
+    return (state.power == null ||
+            capabilities.supports(
+              LightingFeature.power,
+              allowInferred: true,
+            )) &&
         (state.color == null ||
             (capabilities.supports(LightingFeature.rgb, allowInferred: true) ||
-                capabilities.supports(LightingFeature.rgbw, allowInferred: true))) &&
-        (state.brightness == null || capabilities.supports(LightingFeature.brightness, allowInferred: true));
+                capabilities.supports(
+                  LightingFeature.rgbw,
+                  allowInferred: true,
+                ))) &&
+        (state.brightness == null ||
+            capabilities.supports(
+              LightingFeature.brightness,
+              allowInferred: true,
+            ));
   }
 
   @override
-  Future<CommandResult> dispatch(String appDeviceId, ApplyLightingState command) =>
-      _devicesController.execute(appDeviceId, command);
+  Future<CommandResult> dispatch(
+    String appDeviceId,
+    ApplyLightingState command,
+  ) => _devicesController.execute(appDeviceId, command);
 }
 
 /// A local lifecycle fact for one macro-to-device request.
-enum MacroLightingDeliveryOutcome { queued, deduplicated, superseded, dropped, transmitted, rejected, failed, timedOut }
+enum MacroLightingDeliveryOutcome {
+  queued,
+  deduplicated,
+  superseded,
+  dropped,
+  transmitted,
+  rejected,
+  failed,
+  timedOut,
+}
 
 /// A diagnostic event emitted by [MacroLightingDeliveryBridge].
 ///
@@ -149,7 +161,7 @@ final class MacroLightingDeliveryStatus {
   final Object? error;
 }
 
-/// UI-free, bounded delivery adapter for reactive Scene Macro lighting output.
+/// UI-free, bounded delivery adapter for reactive Macro lighting output.
 ///
 /// It permits exactly one write at a time for each physical device. A macro
 /// value received while that write is pending or in flight is dropped locally;
@@ -168,21 +180,21 @@ final class MacroLightingDeliveryBridge {
 
   /// State captured before this macro first targets a device. It survives a
   /// validated live runtime replacement through [inheritRestorationStateFrom].
-  final Map<String, DesiredLightingState> _statesBeforeMacro = <String, DesiredLightingState>{};
+  final Map<String, DesiredLightingState> _statesBeforeMacro =
+      <String, DesiredLightingState>{};
   final Set<String> _snapshotAttemptedDeviceIds = <String>{};
   final Set<String> _changedDeviceIds = <String>{};
-  final StreamController<MacroLightingDeliveryStatus> _statuses = StreamController<MacroLightingDeliveryStatus>.broadcast();
+  final StreamController<MacroLightingDeliveryStatus> _statuses =
+      StreamController<MacroLightingDeliveryStatus>.broadcast();
   var _closed = false;
 
   Stream<MacroLightingDeliveryStatus> get statuses => _statuses.stream;
 
-  /// Captures current local desired states for the targets known at macro
-  /// start. Group membership is resolved immediately, while targets that join
-  /// later are captured just before their first macro update.
+  /// Captures current local desired states for devices known at macro start.
   void captureStatesBeforeMacroWrites(Iterable<MacroTargetBinding> bindings) {
     if (_closed) return;
     for (final binding in bindings) {
-      for (final deviceId in _targetResolver.resolve(targetKind: binding.targetKind, targetId: binding.targetId)) {
+      for (final deviceId in _targetResolver.resolve(binding.targetId)) {
         _captureStateBeforeMacroWrite(deviceId);
       }
     }
@@ -194,7 +206,10 @@ final class MacroLightingDeliveryBridge {
   /// macro stop; it must therefore never reset the restoration baseline.
   void inheritRestorationStateFrom(MacroLightingDeliveryBridge previous) {
     if (_closed) return;
-    previous._statesBeforeMacro.forEach((deviceId, state) => _statesBeforeMacro.putIfAbsent(deviceId, () => state));
+    previous._statesBeforeMacro.forEach(
+      (deviceId, state) =>
+          _statesBeforeMacro.putIfAbsent(deviceId, () => state),
+    );
     _snapshotAttemptedDeviceIds.addAll(previous._snapshotAttemptedDeviceIds);
     _changedDeviceIds.addAll(previous._changedDeviceIds);
   }
@@ -206,7 +221,8 @@ final class MacroLightingDeliveryBridge {
     if (_closed) return;
     final pendingRestores = <MapEntry<String, DesiredLightingState>>[
       for (final deviceId in _changedDeviceIds)
-        if (_statesBeforeMacro[deviceId] case final state?) MapEntry<String, DesiredLightingState>(deviceId, state),
+        if (_statesBeforeMacro[deviceId] case final state?)
+          MapEntry<String, DesiredLightingState>(deviceId, state),
     ];
     _changedDeviceIds.clear();
     _statesBeforeMacro.clear();
@@ -223,8 +239,14 @@ final class MacroLightingDeliveryBridge {
         continue;
       }
       try {
-        final result = await _deviceGateway.dispatch(deviceId, ApplyLightingState(desiredState));
-        developer.log('deviceId=$deviceId lifecycle=restore-${result.outcome.name}', name: 'Lazerus.MacroLightingDeliveryBridge');
+        final result = await _deviceGateway.dispatch(
+          deviceId,
+          ApplyLightingState(desiredState),
+        );
+        developer.log(
+          'deviceId=$deviceId lifecycle=restore-${result.outcome.name}',
+          name: 'Lazerus.MacroLightingDeliveryBridge',
+        );
       } on Object catch (error) {
         developer.log(
           'deviceId=$deviceId lifecycle=restore-failed error=$error',
@@ -249,13 +271,14 @@ final class MacroLightingDeliveryBridge {
           appDeviceId: '',
           outcome: MacroLightingDeliveryOutcome.dropped,
           desiredState: DesiredLightingState(),
-          detail: 'The trigger value is incompatible with this target parameter.',
+          detail:
+              'The trigger value is incompatible with this target parameter.',
         ),
       );
       return;
     }
 
-    final deviceIds = _targetResolver.resolve(targetKind: intent.targetKind, targetId: intent.targetId).toSet();
+    final deviceIds = _targetResolver.resolve(intent.targetId).toSet();
     if (deviceIds.isEmpty) {
       _emit(
         MacroLightingDeliveryStatus(
@@ -285,7 +308,9 @@ final class MacroLightingDeliveryBridge {
   /// Completes after all currently queued writes settle. It is intended for
   /// lifecycle teardown and focused tests, not for a Flutter widget build.
   Future<void> drain() async {
-    while (_queues.values.any((queue) => queue.inFlight || queue.pending != null)) {
+    while (_queues.values.any(
+      (queue) => queue.inFlight || queue.pending != null,
+    )) {
       await Future<void>.delayed(Duration.zero);
     }
   }
@@ -304,18 +329,25 @@ final class MacroLightingDeliveryBridge {
   /// The caller starts this binding before starting the runtime, and closes it
   /// before disposing either owner. Keeping subscription ownership explicit
   /// prevents a macro graph or a widget from retaining a hidden stream.
-  MacroRuntimeLightingBinding bind(MacroRuntime runtime) => MacroRuntimeLightingBinding._(runtime, this);
+  MacroRuntimeLightingBinding bind(MacroRuntime runtime) =>
+      MacroRuntimeLightingBinding._(runtime, this);
 
-  void _submitToDevice(String deviceId, MacroLightingIntent intent, DesiredLightingState partialState) {
+  void _submitToDevice(
+    String deviceId,
+    MacroLightingIntent intent,
+    DesiredLightingState partialState,
+  ) {
     final existingQueue = _queues[deviceId];
-    if (existingQueue != null && (existingQueue.inFlight || existingQueue.pending != null)) {
+    if (existingQueue != null &&
+        (existingQueue.inFlight || existingQueue.pending != null)) {
       _emit(
         MacroLightingDeliveryStatus(
           intent: intent,
           appDeviceId: deviceId,
           outcome: MacroLightingDeliveryOutcome.dropped,
           desiredState: partialState,
-          detail: 'A macro device update is already pending or in flight; the newer value was ignored.',
+          detail:
+              'A macro device update is already pending or in flight; the newer value was ignored.',
         ),
       );
       return;
@@ -336,7 +368,8 @@ final class MacroLightingDeliveryBridge {
       return;
     }
 
-    final queue = existingQueue ?? _queues.putIfAbsent(deviceId, _DeviceQueue.new);
+    final queue =
+        existingQueue ?? _queues.putIfAbsent(deviceId, _DeviceQueue.new);
     _changedDeviceIds.add(deviceId);
     final desired = _merge(queue.latestDesired, partialState);
     queue.latestDesired = desired;
@@ -365,7 +398,11 @@ final class MacroLightingDeliveryBridge {
     unawaited(_dispatch(deviceId, queue, pending));
   }
 
-  Future<void> _dispatch(String deviceId, _DeviceQueue queue, _PendingDelivery pending) async {
+  Future<void> _dispatch(
+    String deviceId,
+    _DeviceQueue queue,
+    _PendingDelivery pending,
+  ) async {
     try {
       // A device can disconnect or a capability profile can change between
       // enqueue and dispatch, so this is deliberately checked again here.
@@ -381,7 +418,10 @@ final class MacroLightingDeliveryBridge {
         );
         return;
       }
-      final result = await _deviceGateway.dispatch(deviceId, ApplyLightingState(pending.desiredState));
+      final result = await _deviceGateway.dispatch(
+        deviceId,
+        ApplyLightingState(pending.desiredState),
+      );
       _emit(_statusForResult(deviceId, pending, result));
     } on Object catch (error) {
       _emit(
@@ -402,7 +442,11 @@ final class MacroLightingDeliveryBridge {
     }
   }
 
-  MacroLightingDeliveryStatus _statusForResult(String deviceId, _PendingDelivery pending, CommandResult result) {
+  MacroLightingDeliveryStatus _statusForResult(
+    String deviceId,
+    _PendingDelivery pending,
+    CommandResult result,
+  ) {
     final outcome = switch (result.outcome) {
       CommandOutcome.queued => MacroLightingDeliveryOutcome.queued,
       CommandOutcome.deduplicated => MacroLightingDeliveryOutcome.deduplicated,
@@ -412,7 +456,8 @@ final class MacroLightingDeliveryBridge {
       CommandOutcome.rejected => MacroLightingDeliveryOutcome.rejected,
       CommandOutcome.failed => MacroLightingDeliveryOutcome.failed,
       CommandOutcome.timedOut => MacroLightingDeliveryOutcome.timedOut,
-      CommandOutcome.superseded || CommandOutcome.dropped => MacroLightingDeliveryOutcome.dropped,
+      CommandOutcome.superseded ||
+      CommandOutcome.dropped => MacroLightingDeliveryOutcome.dropped,
     };
     return MacroLightingDeliveryStatus(
       intent: pending.intent,
@@ -427,9 +472,12 @@ final class MacroLightingDeliveryBridge {
 
   static DesiredLightingState? _stateFor(MacroLightingIntent intent) {
     return switch ((intent.parameter, intent.value)) {
-      (MacroTargetParameter.power, TriggerGateValue(:final value)) => DesiredLightingState(power: value),
-      (MacroTargetParameter.brightness, TriggerLevelValue(:final value)) => DesiredLightingState(brightness: value),
-      (MacroTargetParameter.color, final TriggerHsvValue value) => DesiredLightingState(color: _rgbFromHsv(value)),
+      (MacroTargetParameter.power, TriggerGateValue(:final value)) =>
+        DesiredLightingState(power: value),
+      (MacroTargetParameter.brightness, TriggerLevelValue(:final value)) =>
+        DesiredLightingState(brightness: value),
+      (MacroTargetParameter.color, final TriggerHsvValue value) =>
+        DesiredLightingState(color: _rgbFromHsv(value)),
       _ => null,
     };
   }
@@ -451,22 +499,25 @@ final class MacroLightingDeliveryBridge {
       _ => (chroma, 0.0, secondary),
     };
     final match = hsv.value - chroma;
-    int channel(double component) => (math.max(0, math.min(1, component + match)) * 255).round();
+    int channel(double component) =>
+        (math.max(0, math.min(1, component + match)) * 255).round();
     return RgbColor(channel(red), channel(green), channel(blue));
   }
 
-  static DesiredLightingState _merge(DesiredLightingState? previous, DesiredLightingState incoming) => DesiredLightingState(
+  static DesiredLightingState _merge(
+    DesiredLightingState? previous,
+    DesiredLightingState incoming,
+  ) => DesiredLightingState(
     power: incoming.power ?? previous?.power,
     color: incoming.color ?? previous?.color,
     brightness: incoming.brightness ?? previous?.brightness,
   );
 
   void _emit(MacroLightingDeliveryStatus status) {
-    //TODO: Temporart disabled
-    // if (!_closed) {
-    //   _logDeliveryStatus(status);
-    //   _statuses.add(status);
-    // }
+    if (!_closed) {
+      _logDeliveryStatus(status);
+      _statuses.add(status);
+    }
   }
 
   /// Emits a compact IDE-console trace for the local delivery lifecycle.
@@ -474,28 +525,28 @@ final class MacroLightingDeliveryBridge {
   /// This deliberately logs only scalar lighting target values. In particular,
   /// it never stringifies a [TriggerValue], which could otherwise expose a
   /// microphone PCM payload from an incompatible trigger.
-  // static void _logDeliveryStatus(MacroLightingDeliveryStatus status) {
-  //   final intent = status.intent;
-  //   developer.log(
-  //     'macroId=${intent.macroId} '
-  //     'bindingId=${intent.bindingId} '
-  //     'deviceId=${status.appDeviceId.isEmpty ? '<unresolved>' : status.appDeviceId} '
-  //     'parameter=${intent.parameter.name} '
-  //     'value=${_loggableValue(intent.value)} '
-  //     'lifecycle=${status.outcome.name} '
-  //     'transport=${status.transportOutcome?.name ?? 'none'}',
-  //     name: 'Lazerus.MacroLightingDeliveryBridge',
-  //   );
-  // }
+  static void _logDeliveryStatus(MacroLightingDeliveryStatus status) {
+    final intent = status.intent;
+    developer.log(
+      'macroId=${intent.macroId} '
+      'bindingId=${intent.bindingId} '
+      'deviceId=${status.appDeviceId.isEmpty ? '<unresolved>' : status.appDeviceId} '
+      'parameter=${intent.parameter.name} '
+      'value=${_loggableValue(intent.value)} '
+      'lifecycle=${status.outcome.name} '
+      'transport=${status.transportOutcome?.name ?? 'none'}',
+      name: 'Lazerus.MacroLightingDeliveryBridge',
+    );
+  }
 
-  // static String _loggableValue(TriggerValue value) => switch (value) {
-  //   TriggerGateValue(:final value) => value.toString(),
-  //   TriggerLevelValue(:final value) => value.toString(),
-  //   TriggerHsvValue(:final hue, :final saturation, :final value) =>
-  //     'h=${hue.toStringAsFixed(1)}, s=${saturation.toStringAsFixed(2)}, '
-  //         'v=${value.toStringAsFixed(2)}',
-  //   _ => '<${value.runtimeType}>',
-  // };
+  static String _loggableValue(TriggerValue value) => switch (value) {
+    TriggerGateValue(:final value) => value.toString(),
+    TriggerLevelValue(:final value) => value.toString(),
+    TriggerHsvValue(:final hue, :final saturation, :final value) =>
+      'h=${hue.toStringAsFixed(1)}, s=${saturation.toStringAsFixed(2)}, '
+          'v=${value.toStringAsFixed(2)}',
+    _ => '<${value.runtimeType}>',
+  };
 }
 
 /// Explicit subscription between a running macro and its delivery boundary.
@@ -504,8 +555,10 @@ final class MacroLightingDeliveryBridge {
 /// application composition root selects those lifecycles; this small owner
 /// only makes forwarding and cancellation deterministic.
 final class MacroRuntimeLightingBinding {
-  MacroRuntimeLightingBinding._(MacroRuntime runtime, MacroLightingDeliveryBridge bridge)
-    : _subscription = runtime.lightingIntents.listen(bridge.submit);
+  MacroRuntimeLightingBinding._(
+    MacroRuntime runtime,
+    MacroLightingDeliveryBridge bridge,
+  ) : _subscription = runtime.lightingIntents.listen(bridge.submit);
 
   final StreamSubscription<MacroLightingIntent> _subscription;
 

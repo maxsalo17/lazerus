@@ -35,3 +35,8 @@ IconData deviceStatusIcon(DebugDeviceConnectionStatus status) =>
       DebugDeviceConnectionStatus.error => Icons.bluetooth_disabled,
       DebugDeviceConnectionStatus.discovered => Icons.bluetooth,
     };
+
+String protocolDisplayName(String protocolId) {
+  if (protocolId.endsWith('lotus_lamp_x')) return 'Lotus Lamp X';
+  return protocolId;
+}

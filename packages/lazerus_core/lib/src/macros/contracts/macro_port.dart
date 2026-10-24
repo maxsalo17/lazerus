@@ -1,4 +1,4 @@
-/// The value family carried by an edge in a Scene Macro graph.
+/// The value family carried by an edge in a Macro graph.
 enum MacroPortType {
   /// A mono PCM sample array with a required, positive sample rate.
   triggerMonoAudio,

@@ -1,6 +1,6 @@
 import 'dart:io';
 
-/// Narrow file-system boundary for persisted Scene Macro documents.
+/// Narrow file-system boundary for persisted Macro documents.
 ///
 /// The composition root chooses the application-support directory. This keeps
 /// platform directory discovery out of the macro repository and permits a
@@ -10,9 +10,8 @@ abstract interface class MacroFileStorage {
 
   Future<void> write({required String macroId, required String document});
 
-  /// Removes one macro document without affecting Scene references that may
-  /// still identify it. A missing document is already absent and is not an
-  /// error.
+  /// Removes one macro document. A missing document is already absent and is
+  /// not an error.
   Future<void> delete(String macroId);
 }
 

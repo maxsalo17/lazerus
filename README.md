@@ -1,70 +1,86 @@
 # Lazerus
 
-> Local, cross-platform lighting control for macOS and iOS — starting with
-> Bluetooth Low Energy.
+> Offline-first lighting control for macOS and iOS, beginning with Bluetooth
+> Low Energy.
 
-Lazerus is an offline-first Flutter application for controlling multiple LED
-controllers as individual devices and synchronized logical groups. Bluetooth
-Low Energy (BLE) is the first supported transport; the architecture separates
-transport from the device protocol so future USB, Wi-Fi, HTTP, MQTT, or other
-transports can be added without rewriting lighting, scene, or UI logic. It is
-designed to grow from a few LED strips into an extensible lighting-control
-platform with reusable presets, scenes, software-driven animations, and visual
-automation pipelines.
+Lazerus is a Flutter application for discovering and controlling supported LED
+controllers. BLE is the first transport, while transport selection remains
+separate from device-protocol selection so USB, Wi-Fi, HTTP, MQTT and other
+transports can be added without rewriting the lighting domain.
 
-The project does not require user accounts, a backend, cloud services, or an
-internet connection during normal use.
+The app has no account, backend, cloud service or internet dependency during
+ordinary use.
 
-## Project status
+## Current product model
 
-This repository contains the specification, two Flutter-compatible Dart
-packages, and an iOS/macOS Flutter application with device, group, and control
-screens.
-The authoritative product requirements are in
-[`docs/TECHNICAL_SPECIFICATIONS.md`](docs/TECHNICAL_SPECIFICATIONS.md).
+The application has three top-level areas:
 
-The app performs a general BLE scan, classifies only endpoints matched by an
-installed protocol adapter, and connects to those candidates automatically. It
-discovers GATT characteristics dynamically and surfaces connection/error state.
-Users can manually disconnect and reconnect devices, create local custom
-groups, add members manually, and choose automatic inclusion of newly found
-devices with a matching protocol. Immutable `Common` groups are derived from
-the shared protocol family.
+- **Devices** — discovered compatible controllers, connection state, per-device
+  calibration, and an individual device detail page with power, colour and
+  brightness controls.
+- **Macros** — saved typed patcher graphs that connect triggers and modifiers
+  directly to device input nodes.
+- **Logs** — local connection, protocol and command diagnostics.
 
-The first Lotus Lamp X controls provide power, a saturated red-to-violet colour
-palette, and brightness. Drag controls use a bounded 10 Hz replaceable-command
-ticker and flush their final value on release; they never generate black or
-white Lotus X colour commands. Two physical strips were reported by the user as automatically
-connected and responding to app commands on 2026-10-23. This validates the
-current local setup, not universal compatibility with every controller or
-firmware. A BLE write receipt is never presented as proof that a light changed.
+Groups, Scenes and the separate Control screen have been intentionally removed.
+There is no indirect macro target: a macro connects to a specific device node.
+Manual control is available in that device's detail page; reactive control is
+available in the Macro editor.
 
-The **Devices** screen also supports selecting same-protocol controllers for
-per-device hue calibration. A local curve maps the colour selected in Lazerus
-to the command hue for that strip, with live preview while an anchor is moved.
-Calibration is never assigned to a group: group commands are corrected per
-member and group cards keep showing the intended member colours. Details and
-limitations are in [`docs/COLOR_CALIBRATION.md`](docs/COLOR_CALIBRATION.md).
+## Implemented behaviour
 
-Identity bindings, custom groups, and the Scene composition foundation are
-stored locally. Scene composition uses versioned JSON with stable group/device
-references, slotted typed control bindings, and detectable missing references.
-The **Scenes** section contains a Scene library, Settings/editor and a runtime
-detail surface for targets and custom toggle/brightness/colour controls.
-Runtime bindings resolve their current group/device members, deduplicate them,
-and recheck connection and capabilities before dispatching ordinary lighting
-commands. Unavailable bindings and command errors stay visible in the Scene
-and Logs. A complete structured device database, relinking UI, reconnection
-policy, the central command scheduler, pipelines, and macOS menu-bar controls
-are also still pending.
+The app performs a general BLE scan, lets installed protocol adapters classify
+endpoints, and automatically connects to unambiguous supported candidates. It
+discovers GATT characteristics dynamically and exposes connection and error
+state. A device can be disconnected and reconnected manually.
+
+The first Lotus Lamp X profile provides power, a saturated red-to-violet colour
+palette and brightness. Its normal device controls throttle drag updates with a
+replaceable ticker. For macro-driven output, the delivery bridge accepts one
+pending or in-flight write for a device and drops newer values until it settles;
+this prevents a reactive animation from accumulating a delayed BLE queue.
+
+Two physical strips were reported as automatically connected and responsive on
+2026-10-23. That validates the local setup only; a transport write receipt does
+not prove the controller applied a command or establish compatibility with a
+different controller or firmware.
+
+Per-device hue calibration is local and persistent. It maps the desired colour
+to a device-specific command hue before protocol encoding. The UI keeps the
+desired colour separate from the calibrated transport colour and from any
+best-effort observed state.
+
+## Macros
+
+Macros are versioned, local JSON documents containing a typed directed graph,
+node settings, direct-device target bindings and editor layout. The graph is
+validated before run, is editable while running, and can be saved with
+**Cmd+S**. Stopping a macro performs a best-effort restoration of each device
+state it changed.
+
+The current module library contains:
+
+- microphone PCM mono input;
+- multiband EQ with gate/level outputs, dBFS thresholds and bounded output
+  buffering;
+- HSV colour source, colour-plus-brightness and strobe modifiers; and
+- input-only device nodes exposing only the capabilities currently supported
+  by the selected device.
+
+Macro implementations are isolated modules. Concrete trigger/modifier code
+communicates solely through typed ports and is registered at one composition
+root; the generic editor does not branch on node types. Details are in
+[`docs/MACRO_SYSTEM.md`](docs/MACRO_SYSTEM.md).
 
 ## Packages
 
 | Package | Responsibility | Status |
 | --- | --- | --- |
-| [`packages/lazerus_core`](packages/lazerus_core) | Transport, discovery, protocol-adapter, session, capability, command, and result contracts. | Implemented and tested |
-| [`packages/lazerus_proto_lotus_lamp_x`](packages/lazerus_proto_lotus_lamp_x) | BLE discovery signals, inferred ELK/Lotus Lamp X E1 codec, capability profile, and adapter/session implementation. | Implemented; hardware validation pending |
-| [`apps/lazerus_app`](apps/lazerus_app) | iOS/macOS Flutter surface with automatic BLE connection, device management, per-device hue calibration, protocol/common and custom groups, and compact/detail controls. | Implemented; broader hardware validation pending |
+| [`packages/lazerus_core`](packages/lazerus_core) | Transport, discovery, protocol-adapter, session, capability, command and macro contracts. | Implemented |
+| [`packages/lazerus_proto_lotus_lamp_x`](packages/lazerus_proto_lotus_lamp_x) | BLE discovery signals, inferred Lotus Lamp X E1 codec, capability profile and adapter/session implementation. | Implemented; broader hardware validation pending |
+| [`apps/lazerus_app`](apps/lazerus_app) | iOS/macOS Flutter app: device management, calibration, macros and diagnostics. | Implemented; broader hardware validation pending |
+
+## Run and verify
 
 Run the app on macOS:
 
@@ -74,234 +90,54 @@ flutter pub get
 flutter run -d macos
 ```
 
-Run checks from the package or app directory:
+Run focused checks in each relevant package:
 
 ```sh
+flutter analyze
 flutter test
-dart analyze
 ```
 
-## What Lazerus will do
+## Architecture
 
-- Discover nearby BLE lighting controllers and connect without relying solely
-  on advertised service UUIDs.
-- Save devices locally, restore their configuration, reconnect when appropriate,
-  and support relinking when a platform Bluetooth identifier changes.
-- Control power, color, brightness, color temperature, and native effects when
-  the connected device actually supports them.
-- Organize one or more devices into groups with uniform, sequential,
-  alternating, wave, mirrored, or independently mapped behavior.
-- Apply reusable built-in and custom presets.
-- Coordinate multi-device scenes with priorities, transitions, and explicit
-  conflict handling.
-- Run deterministic, app-driven animations without tying their calculations to
-  BLE writes or Flutter widgets.
-- Build, validate, save, import, export, and execute typed node-based lighting
-  pipelines.
-- Offer persistent macOS menu-bar quick controls and a touch-friendly iOS UI.
-- Store all user data locally and provide portable, versioned JSON imports and
-  backups.
+```text
+Flutter features and controllers
+             │
+             ▼
+Macro runtime / device intent boundary
+             │ common lighting commands
+             ▼
+Protocol adapter registry → selected transport → controller
+```
 
-## Platform scope
+Widgets do not write BLE data. A transport owns scanning, connection and I/O;
+a protocol adapter recognizes compatible endpoints, declares capabilities and
+encodes device-specific commands. Macro modules publish typed lighting intents
+to the application delivery bridge instead of writing to a protocol session.
 
-| Platform | Intended experience |
-| --- | --- |
-| macOS | Full Flutter desktop application, persistent menu-bar controls, long-lived eligible BLE connections, and continued operation after the main window is closed. |
-| iOS | Native Flutter mobile application with device control, local configuration, lifecycle-aware BLE handling, and responsive touch UI. |
+The four state categories remain separate:
 
-On iOS, app-streamed animations cannot be guaranteed while the application is
-suspended or force-quit. Controller-native effects may continue independently,
-but that behavior is device-specific. The product must communicate this
-distinction clearly rather than promising unsupported background execution.
+- **Configuration** — persisted definitions and calibration profiles.
+- **Desired** — requested lighting state.
+- **Transport** — queued or written frames.
+- **Observed** — best-effort device data when supported.
 
-## Hardware, transport, and protocol approach
+For the complete contract direction, see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The hardware evidence record is
+[`docs/BLE_PROTOCOLS.md`](docs/BLE_PROTOCOLS.md), and calibration behaviour is
+[`docs/COLOR_CALIBRATION.md`](docs/COLOR_CALIBRATION.md).
 
-The first protocol family targeted is the ELK-series controller used by Lotus
-Lantern applications. An `ELK-BLEDDM` controller has been discovered and
-connected on macOS; its GATT service and write/notify characteristics are known.
-That connection proves only the basic GATT mapping—not full compatibility with
-every reverse-engineered command.
+## Documentation and product direction
 
-Each hardware family is isolated behind a protocol-adapter interface responsible
-for recognition, capability declaration, command encoding, constraints, optional
-notification decoding, and unsupported-operation handling. A transport driver
-owns physical discovery, connection, and I/O; a protocol adapter tells that
-transport how to identify and operate a compatible controller. Core lighting,
-scene, animation, and UI logic must never depend on a particular controller
-name, UUID, MAC address, protocol variant, or transport implementation.
+[`docs/TECHNICAL_SPECIFICATIONS.md`](docs/TECHNICAL_SPECIFICATIONS.md) remains
+the source document. Its original Group, Scene and separate-Control chapters
+are explicitly superseded by the current direct-device/Macro product decision
+recorded at the top of that document. They are retained there as historical
+requirements context, not active implementation scope.
 
-The detailed contract model, discovery and selection sequence, capability
-layers, persistence model, and extension path are documented in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-The initial BLE profile and validation record are in
-[`docs/BLE_PROTOCOLS.md`](docs/BLE_PROTOCOLS.md).
-The planned Scene composition and custom-control slice is specified in
-[`docs/SCENE_SYSTEM.md`](docs/SCENE_SYSTEM.md).
-The modular Scene Macro workflow is implemented: typed graph contracts,
-validation, application-support JSON persistence, a transport-free
-runtime/registry and bounded in-flight-first lighting-intent delivery. Scenes can
-select saved macros; the Macros page provides a patcher editor with
-`Microphone → Multiband EQ`, modular colour sources/modifiers, a drag palette
-and input-only device nodes. Connecting an output to a device input is the
-binding: gate→power, level→brightness and HSV→colour. HSV is converted through
-the normal calibrated RGB command path, so Lotus Lamp X does not need a
-macro-specific wire protocol. It does not claim microphone/strip hardware
-validation. See
-[`docs/SCENE_MACROS.md`](docs/SCENE_MACROS.md).
-
-The current Flutter app also has a local, in-memory **Logs** screen for BLE
-connection/command errors and inbound packets. Lotus E1-shaped FFF4 data may
-be displayed as a best-effort observation when a supported packet is seen; it
-is not a controller-confirmed state and must not be used as a compatibility or
-execution claim.
-
-While the app is running, protocol sessions merge accepted lighting commands
-and recognized observations into local per-device state. Group and individual
-cards share this state; group colour indicators render the known member colours
-as a gradient. The command boundary keeps a calibrated transport colour
-separate from the desired UI colour. Session state is not yet durable device
-configuration; calibration profiles and their assignments are the narrow local
-JSON-backed exception described below.
-
-Protocol references for validation and research include:
+Protocol research references:
 
 - [LotusLampX](https://github.com/l0lsec/LotusLampX)
 - [LED_UNION](https://github.com/chameleonbr/LED_UNION)
 - [Lotus Lantern for Windows PC](https://github.com/razibit/Lotus-Lantern-for-Windows-PC)
 
-These are reference implementations, not a substitute for testing on physical
-hardware. Commands are considered supported only after the applicable controller
-has been validated.
-
-## Core architecture
-
-```text
-Flutter UI and feature controllers
-              │
-              ▼
-Domain models, repositories, and state arbitration
-              │
-     ┌────────┴─────────┐
-     ▼                  ▼
-Animation/pipeline   BLE command scheduler
-evaluation           (per-device serialized writes)
-     │                  │
-     └──── desired ─────┘
-              │
-              ▼
-Protocol adapter registry → selected transport → LED controller
-```
-
-The architecture follows Clean Architecture and feature-first organization. It
-uses strongly typed domain models, dependency injection, repositories, reactive
-state management, and narrow platform boundaries.
-
-Four states are intentionally separate:
-
-- **Configuration state** — persisted user settings and definitions.
-- **Desired state** — the lighting state selected by arbitration and animation.
-- **Transport state** — commands queued or written to BLE.
-- **Observed state** — device-reported state, when a controller supports it.
-
-A successful write without response is transport success, not proof that a
-physical controller applied the command.
-
-## Lighting behavior and reliability
-
-All software-driven devices share a monotonic logical clock, so their frames are
-calculated from the same timestamp. BLE writes remain independent and are not
-atomic across multiple devices; synchronization quality must be measured rather
-than assumed.
-
-The command scheduler keeps a serialized queue per device and handles frame
-coalescing, duplicate elimination, rate limiting, prioritization, recovery, and
-diagnostic metrics. Generic replaceable animation states can supersede old
-unsent ones, which prevents stale-frame backlogs. High-rate Scene Macro bindings
-use the stricter in-flight-first policy: while one device command is pending or
-running, newer macro values are dropped. Initial experimental update targets are
-10, 20, and 30 Hz; actual rates depend on hardware measurements.
-
-When more than one source addresses a device, the desired state is resolved
-deterministically in this order:
-
-1. Manual temporary override
-2. Active high-priority scene
-3. Active pipeline
-4. Active group mode
-5. Device default
-
-The system retains the winning source so the interface can explain a device's
-current behavior. Native controller effects and app-streamed animations are
-mutually exclusive for a given device.
-
-## Data and privacy
-
-All configuration lives on the device. The planned storage layer is a structured
-local database (SQLite via Drift is the proposed option) with typed models,
-schema migrations, transactions, referential integrity, and reactive access.
-For the current, deliberately narrow per-device hue-calibration and Scene
-composition slices, the user selected versioned JSON documents in the local
-settings store instead of introducing SQLite. Each is behind a repository and
-can be migrated later; see [`docs/COLOR_CALIBRATION.md`](docs/COLOR_CALIBRATION.md)
-and [`docs/SCENE_SYSTEM.md`](docs/SCENE_SYSTEM.md).
-
-Persisted data includes devices, capability profiles, groups and membership,
-presets, scenes, pipelines, node configurations, preferences, overrides,
-favorites, and connection/default-startup settings. Deleting or losing a device
-must leave references detectable and repairable rather than silently corrupting
-other saved configuration.
-
-Imports and exports use versioned JSON packages. Hardware identifiers are not
-portable between macOS and iOS, so imported configurations must allow devices to
-be rediscovered and relinked.
-
-## Delivery roadmap
-
-1. **Foundation and BLE** — Flutter bootstrap, BLE abstraction, ELK adapter,
-   discovery, persistent connections, controls, and diagnostics.
-2. **Device management and persistence** — local database, saved devices,
-   reconnection, capabilities, and settings.
-3. **Groups and presets** — group controls, arbitration, built-in/custom
-   presets, and favorites.
-4. **Animation engine** — timeline, effects, scheduling, coalescing, rate
-   limiting, synchronization, and metrics.
-5. **Scenes** — assignments, transitions, activation/deactivation policy, and
-   persistence.
-6. **Pipeline engine** — typed graph models, validation, runtime, node library,
-   persistence, and diagnostics.
-7. **Visual pipeline editor** — canvas, node editing, undo/redo, preview, and
-   import/export.
-8. **macOS integration** — menu bar, close-to-background behavior, quick
-   controls, launch at login, and lifecycle tests.
-9. **Optimization and release** — stress/performance testing, error handling,
-   backups, end-to-end checks, packaging, and documentation.
-
-## Quality standards
-
-Critical domain logic must have automated coverage, including color and
-brightness calculations, animation evaluation, graph validation/execution,
-arbitration, scheduling, protocol encoding, serialization, and database
-migrations. BLE behavior must also be tested through mocked transports for
-connection recovery, write ordering, missing characteristics, and dropped
-frames.
-
-Real-device validation remains mandatory for protocol compatibility, sustainable
-write rate, connection stability, multiple-device behavior, and synchronization
-accuracy. Do not describe hardware-dependent work as complete until it is
-validated or explicitly recorded as pending.
-
-## Planned documentation
-
-As the implementation is added, these companion documents will be maintained:
-
-- `docs/ARCHITECTURE.md`
-- `docs/BLE_PROTOCOLS.md`
-- `docs/DATA_MODELS.md`
-- `docs/PIPELINE_ENGINE.md`
-- `docs/SCENE_SYSTEM.md`
-- `docs/PERFORMANCE.md`
-- `docs/TESTING.md`
-- `docs/ROADMAP.md`
-
-See [`AGENTS.md`](AGENTS.md) for contributor and coding-agent implementation
-rules.
+These are implementation references, not hardware-validation evidence.

@@ -10,7 +10,7 @@ protocol-adapter direction in
 BLE is the only transport planned for the first delivery, and ELK-series/Lotus
 Lantern controllers are the first protocol family. USB, Wi-Fi, HTTP, MQTT, and
 other transports are extension points only: this document defines contracts so
-they can be added later without changing lighting-domain, scene, pipeline, or
+they can be added later without changing lighting-domain, macro, pipeline, or
 UI code. It does not claim that any of those future transports are implemented
 or available.
 
@@ -47,7 +47,7 @@ a BLE driver must not assume that every BLE endpoint uses the ELK protocol.
 Features and Flutter UI
           │ intent, view state, diagnostics
           ▼
-Lighting domain: configuration, arbitration, scenes, pipelines, animation
+Lighting domain: configuration, arbitration, macros, pipelines, animation
           │ DesiredLightingState / LightingCommand
           ▼
 Device runtime and command scheduler
@@ -75,8 +75,7 @@ arbitration but immediately before `LightingDeviceSession.execute`. The adapter
 therefore continues to encode an ordinary `SetColor`, and a future adapter can
 declare different calibration dimensions without changing transport contracts.
 
-The runtime retains the desired colour for UI state and group-gradient
-aggregation, while the protocol-side/observed state can contain the corrected
+The runtime retains the desired colour for UI state, while the protocol-side/observed state can contain the corrected
 transport colour. Neither is a confirmed physical output. Calibration editing
 uses a temporary resolver override and goes through the ordinary replaceable
 lighting-command ticker; widgets never send raw GATT data. The current
@@ -309,7 +308,7 @@ an explicit protocol-aware surface and cannot affect unrelated device types.
 
 Capabilities may change after reconnecting, firmware changes, or a new probe.
 The runtime must refresh the profile, revalidate scheduled work, and make
-unsupported saved scene/preset/pipeline operations visible and repairable.
+unsupported saved macro/preset/pipeline operations visible and repairable.
 
 ## Discovery, selection, and connection flow
 
@@ -344,7 +343,7 @@ LightingDevice
  ├── transportBindings[]         # mutable endpoint locators per transport
  ├── capabilitySnapshot          # last known, refreshable
  ├── desired/default state
- └── groups, presets, scenes, and pipeline references
+ └── presets, macros, and pipeline references
 ```
 
 A transport binding is a rediscovery hint, not proof of universal identity.
@@ -353,14 +352,14 @@ an HTTP URL may be reconfigured; an MQTT topic can be remapped. Relinking must
 be explicit, preserve references to the local application ID, and not silently
 merge two physical devices.
 
-Protocol definitions, capability snapshots, device/profile data, scenes,
+Protocol definitions, capability snapshots, device/profile data, macros,
 presets, and pipelines require versioned persistence and migrations. An import
 may restore an adapter profile but must force relinking when its transport
 binding cannot be trusted on the target platform.
 
 ## Runtime and scheduler responsibilities
 
-The lighting engine, scene resolver, and pipeline runtime produce
+The lighting engine, macro runtime, and pipeline runtime produce
 `DesiredLightingState` values. The arbitration service resolves exactly one
 winning source per device using the documented priority order. The selected
 device session validates and encodes commands; the scheduler—not the adapter or
@@ -374,16 +373,15 @@ UI—owns these cross-protocol concerns:
 - bounded queues and stale replaceable-frame eviction; and
 - transport, protocol, and scheduler diagnostics.
 
-The implemented Scene Macro output follows this same boundary. A macro
+The implemented Macro output follows this same boundary. A macro
 produces a typed lighting intent, never a direct transport write. For reactive
 macro updates, each device accepts exactly one pending or in-flight write;
 newer values are dropped until that write settles, rather than replacing it or
 forming a backlog. A command reported as `transmitted` reaches only the
 transport boundary, not a physical delivery claim. Concrete microphone/EQ/colour
-modules and the Scene Macro library,
-patcher editor and explicit start/stop UI are implemented. Selecting a macro
-in a Scene remains an indirect saved reference; it does not by itself claim a
-full Scene activation, arbitration or deactivation policy.
+modules, Macro library, patcher editor and explicit start/stop UI are
+implemented. A macro binds directly to discovered device nodes; it has no
+indirect target composition or separate activation surface.
 
 The adapter may declare command constraints or a device-specific safe update
 rate. It must not create an independent unbounded command queue. A scheduler
@@ -410,9 +408,9 @@ The current implementation includes:
   unambiguous supported candidates, connects them automatically, and renders
   transport/protocol status plus guarded power, RGB, and brightness controls.
 - a local application-device identity binding that keeps platform BLE IDs as
-  mutable locators rather than group membership identifiers; and
-- immutable protocol-wide `Common` groups plus locally persisted custom groups
-  with manual and protocol-based automatic membership.
+  mutable locators rather than persistent controller identifiers; and
+- direct device controls on the device detail page plus macro device nodes for
+  reactive control.
 
 The app resolves GATT UUIDs at runtime. A platform BLE identifier remains only
 an in-memory endpoint locator; it is not a saved Lazerus device identity.
@@ -425,8 +423,7 @@ interprets those payloads as a confirmed lighting state.
 
 Each active protocol session also keeps a partial `lastKnownState`: successful
 transport writes merge into it, as do recognized protocol observations. The
-app surface mirrors that local state per device, so group and individual cards
-stay synchronized during the running session. It is explicitly separate from
+app surface mirrors that local state per device. It is explicitly separate from
 confirmed hardware state and is not yet stored in the planned device database.
 
 The initial local device profile has been exercised successfully by the user on
@@ -438,17 +435,16 @@ recorded. `transmitted` and `acknowledged` mean only that the transport accepted
 the frame or received a GATT response; neither means that the controller changed
 its output.
 
-Custom-group definitions and the narrow device-identity binding map currently
-use a versioned local settings store behind repositories. This keeps the screen
-functional offline and avoids treating BLE IDs as group identities, but it is
-not the final structured device database required by the specification. Migrate
-these repositories to the planned Drift/SQLite database together with device
-metadata, relinking, migrations, and referential-integrity handling before
-claiming complete device persistence.
+The narrow device-identity binding map currently uses a versioned local
+settings store behind its repository. This keeps the app functional offline,
+but it is not the final structured device database required by the
+specification. Migrate it to the planned Drift/SQLite database together with
+device metadata, relinking, migrations and referential-integrity handling
+before claiming complete device persistence.
 
 It does **not** yet implement active GATT probing, encrypted framing, validated
 notification decoding, a centralized scheduler, a complete structured device
-database/relink flow, reconnection policy, scenes, pipelines, or macOS
+database/relink flow, reconnection policy, pipeline execution, or macOS
 menu-bar controls. The macOS runner hides the main window on close and reopens
 it when activated, but it does not yet offer the required background menu-bar
 controls. Basic controls are available for the locally exercised profile; that
@@ -504,11 +500,11 @@ manager.
 
 Concrete macro triggers and modifiers are separate modules registered in the
 application composition root. They communicate only through validated typed
-ports and must not import one another. The Scene Macro plan and the initial
-audio/EQ flow are documented in [`SCENE_MACROS.md`](SCENE_MACROS.md).
+ports and must not import one another. The Macro system and the initial
+audio/EQ flow are documented in [`MACRO_SYSTEM.md`](MACRO_SYSTEM.md).
 
 The `sink.lighting_target` module is an input-only graph representation of a
-device or group. Its incoming edges derive the portable runtime target binding;
+device. Its incoming edges derive the portable runtime target binding;
 it performs no I/O. `triggerHsv` remains a macro value until the app delivery
 bridge converts it to the shared RGB state, after which normal calibration and
 protocol encoding apply. This keeps colour modifiers, target nodes and Lotus X

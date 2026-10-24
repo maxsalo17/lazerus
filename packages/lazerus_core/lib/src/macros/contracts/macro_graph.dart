@@ -1,6 +1,6 @@
 import 'macro_port.dart';
 
-/// Current version of the persisted Scene Macro graph document schema.
+/// Current version of the persisted Macro graph document schema.
 const int currentMacroGraphSchemaVersion = 1;
 
 /// A persisted, reusable graph configuration. Runtime streams and values are
@@ -198,17 +198,14 @@ final class MacroEdge {
   );
 }
 
-enum MacroTargetKind { device, group }
-
 /// A capability-neutral target parameter that can receive a trigger value.
 enum MacroTargetParameter { brightness, power, color }
 
-/// A graph output mapping to one saved device or group reference.
+/// A graph output mapping to one saved device reference.
 final class MacroTargetBinding {
   MacroTargetBinding({
     required this.id,
     required this.sourcePortId,
-    required this.targetKind,
     required this.targetId,
     required this.parameter,
   }) {
@@ -219,14 +216,12 @@ final class MacroTargetBinding {
 
   final String id;
   final String sourcePortId;
-  final MacroTargetKind targetKind;
   final String targetId;
   final MacroTargetParameter parameter;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
     'sourcePortId': sourcePortId,
-    'targetKind': targetKind.name,
     'targetId': targetId,
     'parameter': parameter.name,
   };
@@ -235,11 +230,6 @@ final class MacroTargetBinding {
       MacroTargetBinding(
         id: _requiredString(json, 'id'),
         sourcePortId: _requiredString(json, 'sourcePortId'),
-        targetKind: _enumByName(
-          MacroTargetKind.values,
-          _requiredString(json, 'targetKind'),
-          'targetKind',
-        ),
         targetId: _requiredString(json, 'targetId'),
         parameter: _enumByName(
           MacroTargetParameter.values,
@@ -267,27 +257,6 @@ final class MacroEditorPosition {
         x: _requiredDouble(json, 'x'),
         y: _requiredDouble(json, 'y'),
       );
-}
-
-/// A repairable reference from a Scene configuration to a saved macro.
-final class SceneMacroReference {
-  SceneMacroReference({required this.macroId}) {
-    _requireId(macroId, 'macroId');
-  }
-
-  final String macroId;
-
-  Map<String, Object?> toJson() => <String, Object?>{'macroId': macroId};
-
-  factory SceneMacroReference.fromJson(Map<String, Object?> json) =>
-      SceneMacroReference(macroId: _requiredString(json, 'macroId'));
-
-  @override
-  bool operator ==(Object other) =>
-      other is SceneMacroReference && other.macroId == macroId;
-
-  @override
-  int get hashCode => macroId.hashCode;
 }
 
 Map<String, Object?> _portToJson(MacroPortDeclaration port) =>

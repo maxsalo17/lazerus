@@ -5,10 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lazerus_core/lazerus_core.dart';
 
-import '../../control/application/lighting_controls_controller.dart';
-import '../../control/presentation/color_utils.dart';
 import '../../debug/application/debug_devices_controller.dart';
-import '../../groups/application/group_targets.dart';
+import '../../devices/application/device_controls_controller.dart';
+import '../../devices/presentation/color_utils.dart';
+import '../../devices/presentation/device_display.dart';
 import '../application/device_calibration_controller.dart';
 import '../domain/hue_calibration.dart';
 
@@ -30,7 +30,7 @@ class CalibrationPage extends ConsumerStatefulWidget {
 
 class _CalibrationPageState extends ConsumerState<CalibrationPage> {
   final TextEditingController _nameController = TextEditingController();
-  late final LightingTarget _previewTarget;
+  late final String _previewOperationId;
   List<HueCalibrationAnchor> _anchors = const <HueCalibrationAnchor>[];
   String? _selectedProfileId;
   double? _activeInput;
@@ -42,20 +42,14 @@ class _CalibrationPageState extends ConsumerState<CalibrationPage> {
   void initState() {
     super.initState();
     final sortedIds = widget.deviceIds.toList()..sort();
-    _previewTarget = LightingTarget(
-      id: 'calibration-preview:${sortedIds.join(',')}',
-      name: 'Calibration preview',
-      kind: LightingTargetKind.customGroup,
-      memberDeviceIds: widget.deviceIds,
-      protocolId: widget.protocolId,
-    );
+    _previewOperationId = 'calibration-preview:${sortedIds.join(',')}';
   }
 
   @override
   void dispose() {
     ref
-        .read(lightingControlsProvider.notifier)
-        .cancelReplaceable(_previewTarget.id);
+        .read(deviceControlsProvider.notifier)
+        .cancelReplaceable(_previewOperationId);
     ref.read(deviceCalibrationProvider.notifier).clearPreview(widget.deviceIds);
     _nameController.dispose();
     super.dispose();
@@ -283,10 +277,14 @@ class _CalibrationPageState extends ConsumerState<CalibrationPage> {
     ref
         .read(deviceCalibrationProvider.notifier)
         .preview(appDeviceIds: widget.deviceIds, profile: profile);
-    final controls = ref.read(lightingControlsProvider.notifier);
-    controls.queueReplaceable(_previewTarget, SetColor(lotusHueColor(input)));
+    final controls = ref.read(deviceControlsProvider.notifier);
+    controls.queueReplaceable(
+      operationId: _previewOperationId,
+      appDeviceIds: widget.deviceIds,
+      command: SetColor(lotusHueColor(input)),
+    );
     if (commit) {
-      unawaited(controls.flushReplaceable(_previewTarget.id));
+      unawaited(controls.flushReplaceable(_previewOperationId));
     }
   }
 

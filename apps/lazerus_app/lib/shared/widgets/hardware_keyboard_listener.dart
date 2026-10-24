@@ -30,11 +30,14 @@ class HardwareKeyboardListener extends StatefulWidget {
   final bool canRequestFocus;
 
   @override
-  State<HardwareKeyboardListener> createState() => _HardwareKeyboardListenerState();
+  State<HardwareKeyboardListener> createState() =>
+      _HardwareKeyboardListenerState();
 }
 
 class _HardwareKeyboardListenerState extends State<HardwareKeyboardListener> {
-  late final FocusNode _internalFocusNode = FocusNode(debugLabel: 'HardwareKeyboardListener');
+  late final FocusNode _internalFocusNode = FocusNode(
+    debugLabel: 'HardwareKeyboardListener',
+  );
 
   FocusNode get _focusNode => widget.focusNode ?? _internalFocusNode;
 

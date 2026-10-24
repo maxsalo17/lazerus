@@ -12,13 +12,42 @@
 
 ---
 
+## Current product direction — revision 1.1
+
+The original 1.0 specification described Groups, Scenes and a standalone
+Controls surface. The product decision recorded on 2026-10-25 supersedes that
+scope:
+
+- **Groups are removed.** There is no group persistence, membership, target
+  expansion, group arbitration or group UI.
+- **Scenes are removed.** There are no scene definitions, scene composition,
+  scene activation or scene UI.
+- **The standalone Control feature is removed.** Manual power, colour and
+  brightness controls are available on an individual device's detail page.
+- **Macros are the multi-device automation model.** A typed macro graph wires
+  triggers/modifiers directly to individual device input nodes. A macro has no
+  indirect target kind and no dependency on a scene or group.
+
+Accordingly, every requirement below that prescribes a Group, Scene or separate
+Control feature is retained as historical context only and is not active
+implementation scope. The Macro system is documented in
+[`MACRO_SYSTEM.md`](MACRO_SYSTEM.md). All other architectural, offline-first,
+transport/protocol separation, lifecycle, capability, scheduler and hardware
+validation requirements remain in force unless this revision explicitly says
+otherwise.
+
+---
+
 # 1. Project Overview
 
 ## 1.1 Purpose
 
-Develop a cross-platform Flutter application for controlling multiple Bluetooth LED controllers, individually and as synchronized groups.
+Develop a cross-platform Flutter application for controlling multiple Bluetooth
+LED controllers individually and through typed Macro automation.
 
-The application must provide an extensible system for managing lighting devices, defining effects, creating complex animation pipelines, configuring lighting scenes, and executing synchronized lighting behaviors with low latency.
+The application must provide an extensible system for managing lighting devices,
+defining effects, creating complex Macro graphs and executing responsive
+lighting behaviours with low latency.
 
 The application must support both simple everyday usage and advanced programmable lighting automation.
 
@@ -42,7 +71,7 @@ The application should function completely offline without requiring external se
 - Native Flutter mobile application.
 - Responsive touch-based UI.
 - BLE device discovery and control.
-- Management of devices, groups, scenes and pipelines.
+- Device management and Macro editing.
 - Local persistence.
 - Support for iOS lifecycle and Bluetooth permission handling.
 
@@ -55,7 +84,7 @@ Continuous animation execution in the iOS background must not be assumed. Implem
 3. Persistent BLE connections.
 4. Modular protocol adapters.
 5. Independent device management.
-6. Group-based lighting control.
+6. Direct-device and Macro-based lighting control.
 7. Deterministic animation calculation.
 8. Reusable effects and pipelines.
 9. Persistent configuration.
@@ -938,7 +967,7 @@ Never queue every intermediate animation frame indefinitely.
 
 When a newer replaceable lighting state becomes available, older untransmitted states should be discarded.
 
-For high-rate Scene Macro trigger bindings, use an explicit in-flight-first
+For high-rate Macro trigger bindings, use an explicit in-flight-first
 policy: after the first device command is accepted for dispatch, discard all
 newer macro values for that device until the command settles (success, failure,
 rejection, timeout or drop). Do not replace an in-flight macro command or keep
@@ -1554,18 +1583,15 @@ Implement:
 
 **Deliverable:** Reliable everyday device management.
 
-## Phase 3 — Groups and Presets
+## Phase 3 — Direct-device presets
 
 Implement:
 
-- Device groups.
-- Group controls.
-- Group arbitration.
 - Built-in presets.
 - Custom presets.
 - Favorites.
 
-**Deliverable:** Multi-device lighting management.
+**Deliverable:** Reusable direct-device lighting configuration.
 
 ## Phase 4 — Animation Engine
 
@@ -1581,18 +1607,17 @@ Implement:
 
 **Deliverable:** Stable software-generated lighting animations.
 
-## Phase 5 — Scenes
+## Phase 5 — Macro automation
 
 Implement:
 
-- Scene creation.
-- Multi-device assignments.
-- Scene transitions.
-- Scene persistence.
-- Scene activation policies.
-- Conflict resolution.
+- Versioned Macro documents.
+- Typed graph validation and execution.
+- Direct device target nodes.
+- Trigger/modifier module registry.
+- Explicit start/stop and restoration policy.
 
-**Deliverable:** Full lighting scene management.
+**Deliverable:** Modular device automation through Macros.
 
 ## Phase 6 — Pipeline Engine
 
@@ -1741,7 +1766,7 @@ docs/ARCHITECTURE.md
 docs/BLE_PROTOCOLS.md
 docs/DATA_MODELS.md
 docs/PIPELINE_ENGINE.md
-docs/SCENE_SYSTEM.md
+docs/MACRO_SYSTEM.md
 docs/PERFORMANCE.md
 docs/TESTING.md
 docs/ROADMAP.md
@@ -1766,7 +1791,9 @@ A feature is complete only when:
 
 The final product must function as an extensible local lighting control platform, not merely as a Bluetooth remote.
 
-It must provide a consistent system for discovering devices, storing configurations, independently controlling lights, grouping hardware, constructing reusable lighting behaviors, executing complex animation pipelines and activating synchronized multi-device scenes.
+It must provide a consistent system for discovering devices, storing
+configurations, independently controlling lights, constructing reusable Macro
+automation and executing typed, direct-device lighting behaviours.
 
 The system should scale from two simple Bluetooth LED strips to a larger, heterogeneous lighting installation without fundamental architectural changes.
 

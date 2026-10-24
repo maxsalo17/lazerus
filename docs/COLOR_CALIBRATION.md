@@ -5,9 +5,8 @@
 Provide a local, persistent correction for controllers whose emitted colour is
 not linear with the colour selected in Lazerus. The first implementation
 targets the Lotus Lamp X saturated hue range (red through violet). A
-calibration is assigned to devices, never to a group: a group command is
-corrected independently for each member before its protocol adapter encodes
-the command.
+calibration is assigned to devices. Each outgoing device command is corrected
+independently before its protocol adapter encodes the command.
 
 ## Product behaviour
 
@@ -29,10 +28,10 @@ the command.
   existing replaceable-command ticker. Preview command writes are not hardware
   confirmation. Closing the editor without saving removes its temporary
   mapping.
-- UI state and group gradients continue to show desired colours. The
-  calibration mapping produces a distinct transport colour immediately before
-  protocol encoding. Observed protocol data remains transport/observed data;
-  it is not inverted or presented as proof of physical output.
+- UI state continues to show desired colours. The calibration mapping produces
+  a distinct transport colour immediately before protocol encoding. Observed
+  protocol data remains transport/observed data; it is not inverted or
+  presented as proof of physical output.
 
 ## Contract and storage
 
@@ -70,8 +69,7 @@ without changing calibration or UI contracts.
    modify, reset, save, and re-open a profile.
 2. A saved profile and its device assignments survive an application restart.
 3. A `SetColor` to selected calibrated devices sends a separately mapped
-   transport colour while their device cards and group gradients retain the
-   desired colour.
+   transport colour while their device cards retain the desired colour.
 4. A curve drag produces debounced/replaceable preview commands and removes
    the temporary override on exit.
 5. Unit tests cover curve interpolation, colour mapping, JSON validation,
@@ -79,7 +77,6 @@ without changing calibration or UI contracts.
 
 ## Non-goals in this slice
 
-- Group-level calibration or profile assignment.
 - Full RGB/Lab 3D colour calibration, automatic camera/sensor measurement, or
   inverse decoding of inbound device state.
 - Cross-device configuration export/import. This follows the future versioned

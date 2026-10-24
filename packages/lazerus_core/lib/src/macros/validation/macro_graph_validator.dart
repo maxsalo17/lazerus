@@ -43,7 +43,7 @@ final class MacroGraphValidationIssue {
 
 /// Optional external checks supplied by the future persistence/runtime layer.
 abstract interface class MacroTargetValidator {
-  /// Returns null when a saved device/group target is currently valid.
+  /// Returns null when a saved direct-device target is currently valid.
   String? validate(MacroTargetBinding binding);
 }
 

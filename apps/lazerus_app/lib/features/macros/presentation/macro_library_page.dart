@@ -8,23 +8,9 @@ import '../application/macro_library_controller.dart';
 import '../application/macro_runtime_session_controller.dart';
 import 'macro_editor_page.dart';
 
-/// Reusable library of locally saved Scene Macro graph definitions.
-///
-/// Definitions live independently of Scenes. Deleting a definition never
-/// rewrites a Scene: a selected Scene retains a visible, repairable reference.
+/// Library of locally saved Macro graph definitions.
 class MacroLibraryPage extends ConsumerWidget {
   const MacroLibraryPage({super.key});
-
-  /// Opens selection mode for a Scene Settings host.
-  static Future<Iterable<SceneMacroReference>?> selectForScene(
-    BuildContext context,
-    List<SceneMacroReference> initialReferences,
-  ) => Navigator.of(context).push<Iterable<SceneMacroReference>>(
-    MaterialPageRoute<Iterable<SceneMacroReference>>(
-      builder: (_) =>
-          _MacroScenePickerPage(initialReferences: initialReferences),
-    ),
-  );
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -58,7 +44,7 @@ class MacroLibraryPage extends ConsumerWidget {
               padding: const EdgeInsets.all(16),
               children: <Widget>[
                 const Text(
-                  'Macros зберігаються локально як графи. Запуск показує лише стан runtime та transport write — не фізичне підтвердження стрічки.',
+                  'Macros зберігаються локально як графи. Запуск показує стан runtime та transport write, а не фізичне підтвердження стрічки.',
                 ),
                 const SizedBox(height: 16),
                 if (library.error case final error? when error.isNotEmpty)
@@ -97,9 +83,7 @@ class MacroLibraryPage extends ConsumerWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text('Видалити «${macro.name}»?'),
-        content: const Text(
-          'Scene не буде змінено: у ній залишиться посилання, яке можна буде відновити або прибрати вручну.',
-        ),
+        content: const Text('Цей macro і його runtime буде зупинено.'),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -163,115 +147,6 @@ class _MacroTile extends ConsumerWidget {
   }
 }
 
-class _MacroScenePickerPage extends ConsumerStatefulWidget {
-  const _MacroScenePickerPage({required this.initialReferences});
-
-  final List<SceneMacroReference> initialReferences;
-
-  @override
-  ConsumerState<_MacroScenePickerPage> createState() =>
-      _MacroScenePickerPageState();
-}
-
-class _MacroScenePickerPageState extends ConsumerState<_MacroScenePickerPage> {
-  late Set<String> _selectedIds;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedIds = widget.initialReferences.map((item) => item.macroId).toSet();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final library = ref.watch(macroLibraryProvider);
-    final availableIds = library.macros.map((macro) => macro.id).toSet();
-    final missing = _selectedIds.difference(availableIds);
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Додати macros до Scene'),
-        actions: <Widget>[
-          TextButton(
-            key: const Key('apply-scene-macro-selection'),
-            onPressed: library.isLoading
-                ? null
-                : () => Navigator.of(context).pop(
-                    _selectedIds
-                        .map((id) => SceneMacroReference(macroId: id))
-                        .toList(growable: false),
-                  ),
-            child: const Text('Готово'),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'create-macro-for-scene',
-        onPressed: library.isLoading ? null : _createMacro,
-        icon: const Icon(Icons.add),
-        label: const Text('Новий macro'),
-      ),
-      body: library.isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: <Widget>[
-                if (missing.isNotEmpty) ...<Widget>[
-                  const _MacroLibraryError(
-                    message:
-                        'Деякі раніше вибрані macros зараз відсутні. Вони залишаться у Scene, поки ви не приберете їх тут.',
-                  ),
-                  ...missing.map(
-                    (id) => CheckboxListTile(
-                      key: Key('scene-macro-missing-$id'),
-                      value: true,
-                      onChanged: (_) => setState(() => _selectedIds.remove(id)),
-                      title: Text(id),
-                      subtitle: const Text('Відсутній macro'),
-                    ),
-                  ),
-                ],
-                if (library.macros.isEmpty)
-                  const _EmptyMacroLibrary()
-                else
-                  ...library.macros.map(
-                    (macro) => CheckboxListTile(
-                      key: Key('scene-macro-picker-${macro.id}'),
-                      value: _selectedIds.contains(macro.id),
-                      onChanged: (selected) => setState(() {
-                        if (selected ?? false) {
-                          _selectedIds.add(macro.id);
-                        } else {
-                          _selectedIds.remove(macro.id);
-                        }
-                      }),
-                      title: Text(macro.name),
-                      subtitle: Text(
-                        '${macro.nodes.length} вузли · ${macro.targetBindings.length} bindings',
-                      ),
-                      secondary: IconButton(
-                        tooltip: 'Відкрити editor',
-                        onPressed: () => Navigator.of(context).push<void>(
-                          MaterialPageRoute<void>(
-                            builder: (_) => MacroEditorPage(macro: macro),
-                          ),
-                        ),
-                        icon: const Icon(Icons.edit_outlined),
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 72),
-              ],
-            ),
-    );
-  }
-
-  Future<void> _createMacro() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const MacroEditorPage()),
-    );
-  }
-}
-
 class _EmptyMacroLibrary extends StatelessWidget {
   const _EmptyMacroLibrary();
 
@@ -285,7 +160,7 @@ class _EmptyMacroLibrary extends StatelessWidget {
           SizedBox(height: 10),
           Text('Macros ще немає.'),
           SizedBox(height: 4),
-          Text('Створіть граф і прив’яжіть його outputs до девайсів або груп.'),
+          Text('Створіть граф і прив’яжіть його outputs до девайсів.'),
         ],
       ),
     ),
@@ -294,6 +169,7 @@ class _EmptyMacroLibrary extends StatelessWidget {
 
 class _MacroLibraryError extends StatelessWidget {
   const _MacroLibraryError({required this.message});
+
   final String message;
 
   @override

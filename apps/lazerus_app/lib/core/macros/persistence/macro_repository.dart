@@ -4,18 +4,13 @@ import 'package:lazerus_core/lazerus_core.dart';
 
 import 'macro_file_storage.dart';
 
-/// Persists reusable Scene Macro graphs independently from Scene documents.
-///
-/// A Scene keeps only a [SceneMacroReference]; removing or corrupting a macro
-/// file therefore cannot silently rewrite the Scene that selected it.
+/// Persists reusable Macro graphs.
 abstract interface class MacroRepository {
   Future<List<MacroGraph>> load();
 
   Future<void> save(MacroGraph macro);
 
-  /// Deletes only the macro definition. Scene references are intentionally
-  /// retained by their separate repository and become repairable missing
-  /// references instead of being silently rewritten.
+  /// Deletes one macro definition.
   Future<void> delete(String macroId);
 }
 

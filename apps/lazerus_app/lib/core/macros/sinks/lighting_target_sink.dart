@@ -1,6 +1,6 @@
 import 'package:lazerus_core/lazerus_core.dart';
 
-/// Input-only graph node that represents a saved lighting target on the plot.
+/// Input-only graph node that represents a saved lighting device on the plot.
 ///
 /// The runtime's portable [MacroTargetBinding] remains the delivery contract;
 /// the editor derives those bindings from incoming edges to this sink. The
@@ -10,7 +10,6 @@ const String lightingTargetSinkKind = 'sink.lighting_target';
 
 final class LightingTargetNodeConfiguration {
   LightingTargetNodeConfiguration({
-    required this.targetKind,
     required this.targetId,
     required Iterable<MacroTargetParameter> parameters,
   }) : parameters = List<MacroTargetParameter>.unmodifiable(parameters) {
@@ -33,12 +32,10 @@ final class LightingTargetNodeConfiguration {
     }
   }
 
-  final MacroTargetKind targetKind;
   final String targetId;
   final List<MacroTargetParameter> parameters;
 
   Map<String, Object?> toNodeParameters() => <String, Object?>{
-    'targetKind': targetKind.name,
     'targetId': targetId,
     'parameters': parameters.map((parameter) => parameter.name).toList(),
   };
@@ -47,21 +44,15 @@ final class LightingTargetNodeConfiguration {
     if (node.kind != lightingTargetSinkKind) {
       throw FormatException('The node is not a lighting target sink.');
     }
-    final rawKind = node.parameters['targetKind'];
     final rawTargetId = node.parameters['targetId'];
     final rawParameters = node.parameters['parameters'];
-    if (rawKind is! String || rawTargetId is! String) {
-      throw FormatException('Target kind and ID must be strings.');
+    if (rawTargetId is! String) {
+      throw FormatException('Target ID must be a string.');
     }
     if (rawParameters is! List<Object?>) {
       throw FormatException('Target parameters must be a list.');
     }
-    final targetKind = MacroTargetKind.values.where(
-      (candidate) => candidate.name == rawKind,
-    );
-    if (targetKind.isEmpty) throw FormatException('Unknown target kind.');
     return LightingTargetNodeConfiguration(
-      targetKind: targetKind.single,
       targetId: rawTargetId,
       parameters: rawParameters.map((raw) {
         if (raw is! String) {
@@ -114,7 +105,7 @@ final class LightingTargetSinkFactory
   @override
   String get kind => lightingTargetSinkKind;
 
-  /// Target ports are configured per selected device/group.
+  /// Target ports are configured per selected device.
   @override
   List<MacroPortDeclaration> get ports => const <MacroPortDeclaration>[];
 

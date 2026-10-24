@@ -7,8 +7,6 @@ import 'package:lazerus_core/lazerus_core.dart';
 import '../../../core/macros/registry/macro_module_registry.dart';
 import '../../../core/macros/runtime/macro_lighting_delivery_bridge.dart';
 import '../../debug/application/debug_devices_controller.dart';
-import '../../groups/application/custom_groups_controller.dart';
-import '../../groups/application/group_targets.dart';
 import 'macro_library_controller.dart';
 
 /// Builds a short-lived delivery bridge for exactly one runtime session.
@@ -17,19 +15,9 @@ import 'macro_library_controller.dart';
 /// writes and a status stream that are closed when its runtime stops.
 final macroLightingDeliveryBridgeFactoryProvider =
     Provider<MacroLightingDeliveryBridge Function()>((ref) {
-      Iterable<LightingTarget> currentGroups() {
-        final devices = ref.read(debugDevicesProvider).devices.values;
-        final customGroups = ref.read(customGroupsProvider);
-        return <LightingTarget>[
-          ...protocolGroupTargets(devices),
-          ...customGroupTargets(customGroups.groups, devices),
-        ];
-      }
-
       return () => MacroLightingDeliveryBridge(
         targetResolver: DebugMacroLightingTargetResolver(
           currentDevices: () => ref.read(debugDevicesProvider),
-          currentGroups: currentGroups,
         ),
         deviceGateway: DebugMacroLightingDeviceGateway(
           currentDevices: () => ref.read(debugDevicesProvider),
@@ -223,7 +211,7 @@ final class MacroRuntimeSessionStatus {
   );
 }
 
-/// State intended for Scene and presentation consumers. [recentEvents] is a
+/// State intended for presentation consumers. [recentEvents] is a
 /// bounded snapshot; use [MacroRuntimeSessionController.events] for a live
 /// diagnostic stream.
 final class MacroRuntimeSessionsState {
@@ -240,8 +228,7 @@ final class MacroRuntimeSessionsState {
 
 /// Explicit owner of all running macro graph runtimes.
 ///
-/// Scenes call [start] and [stop] rather than retaining runtime objects. This
-/// controller validates each saved graph against the currently installed
+/// This controller validates each saved graph against the currently installed
 /// module registry, then owns the runtime, its lighting binding, delivery
 /// bridge, and all diagnostic subscriptions until teardown completes.
 final class MacroRuntimeSessionController
