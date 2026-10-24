@@ -96,6 +96,34 @@ void main() {
       await bridge.close();
     },
   );
+
+  test(
+    'maps a typed HSV color intent to the common RGB lighting state',
+    () async {
+      final gateway = _ImmediateGateway();
+      final bridge = MacroLightingDeliveryBridge(
+        targetResolver: const _Resolver(<String>{'device-a'}),
+        deviceGateway: gateway,
+      );
+
+      bridge.submit(
+        MacroLightingIntent(
+          macroId: 'macro',
+          bindingId: 'color',
+          targetKind: MacroTargetKind.device,
+          targetId: 'device-a',
+          parameter: MacroTargetParameter.color,
+          value: TriggerHsvValue(hue: 0, saturation: 1, value: 1),
+          timestamp: Duration.zero,
+          sequence: 0,
+        ),
+      );
+      await bridge.drain();
+
+      expect(gateway.commands.single.state.color, RgbColor(255, 0, 0));
+      await bridge.close();
+    },
+  );
 }
 
 MacroLightingIntent _brightnessIntent(double value, {required int sequence}) =>
@@ -151,5 +179,21 @@ final class _BlockingGateway implements MacroLightingDeviceGateway {
       command: command,
       outcome: commands.length == 1 ? firstOutcome : CommandOutcome.transmitted,
     );
+  }
+}
+
+final class _ImmediateGateway implements MacroLightingDeviceGateway {
+  final List<ApplyLightingState> commands = <ApplyLightingState>[];
+
+  @override
+  bool canDispatch(String appDeviceId, DesiredLightingState state) => true;
+
+  @override
+  Future<CommandResult> dispatch(
+    String appDeviceId,
+    ApplyLightingState command,
+  ) async {
+    commands.add(command);
+    return CommandResult(command: command, outcome: CommandOutcome.transmitted);
   }
 }

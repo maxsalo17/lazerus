@@ -1,18 +1,16 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lazerus_core/lazerus_core.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../core/macros/modifiers/color/color_modifier.dart';
+import '../../../core/macros/modifiers/color_brightness_combine/color_brightness_combine_modifier.dart';
 import '../../../core/macros/triggers/microphone/microphone_mono_audio_trigger.dart';
 import '../../../core/macros/triggers/microphone/microphone_pcm_session.dart';
 import '../../../core/macros/triggers/multiband_eq/multiband_eq_trigger.dart';
 import '../../../core/macros/registry/macro_module_registry.dart';
+import '../../../core/macros/sinks/lighting_target_sink.dart';
 import '../../debug/application/debug_devices_controller.dart';
-import '../../groups/application/custom_groups_controller.dart';
-import '../../groups/application/group_targets.dart';
-import '../../groups/domain/lighting_group.dart';
 import '../application/macro_library_controller.dart';
 import '../application/macro_runtime_session_controller.dart';
 import 'macro_graph_definition.dart';
@@ -36,13 +34,14 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
   String? _selectedNodeId;
   String? _error;
   var _saving = false;
+  final GlobalKey _patcherDropKey = GlobalKey();
 
   bool get _isNew => widget.macro == null;
 
   @override
   void initState() {
     super.initState();
-    _draft = widget.macro ?? _initialMacro();
+    _draft = _migrateLegacyBindings(widget.macro ?? _initialMacro());
     _nameController = TextEditingController(text: _draft.name);
     _selectedNodeId = _draft.nodes.firstOrNull?.id;
   }
@@ -64,11 +63,6 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
     final editorEnabled = !_saving && !running;
     final telemetry = status?.lastTelemetry;
     final devicesState = ref.watch(debugDevicesProvider);
-    final groupsState = ref.watch(customGroupsProvider);
-    final targetOptions = _targetOptions(
-      devices: devicesState.devices.values,
-      customGroups: groupsState.groups,
-    );
     final microphoneStatus = ref
         .watch(microphoneCaptureStatusProvider)
         .asData
@@ -133,19 +127,53 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
             ),
             const SizedBox(height: 10),
             SizedBox(
-              height: 460,
-              child: Card(
-                clipBehavior: Clip.antiAlias,
-                child: MacroPatcherCanvas(
-                  graph: _graphDefinition,
-                  selectedNodeId: _selectedNodeId,
-                  outputValueLabels: _outputValueLabels(status),
-                  onSelectionChanged: (nodeId) =>
-                      setState(() => _selectedNodeId = nodeId),
-                  onNodeMove: editorEnabled ? _moveNode : null,
-                  onConnectionCreate: editorEnabled ? _connectPorts : null,
-                  onConnectionRemove: editorEnabled ? _removeEdge : null,
-                ),
+              height: 500,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  SizedBox(
+                    width: 228,
+                    child: _MacroPalette(
+                      devices: devicesState.sortedDevices,
+                      enabled: editorEnabled,
+                      onAdd: _addPaletteItem,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DragTarget<_MacroPaletteItem>(
+                      key: _patcherDropKey,
+                      onWillAcceptWithDetails: (_) => editorEnabled,
+                      onAcceptWithDetails: (details) => _addPaletteItem(
+                        details.data,
+                        _dropPositionFor(details.offset),
+                      ),
+                      builder: (context, candidate, rejected) => Card(
+                        clipBehavior: Clip.antiAlias,
+                        color: candidate.isNotEmpty
+                            ? Theme.of(context).colorScheme.primaryContainer
+                            : null,
+                        child: MacroPatcherCanvas(
+                          graph: _graphDefinition,
+                          selectedNodeId: _selectedNodeId,
+                          outputValueLabels: _outputValueLabels(status),
+                          nodeBodyBuilder: _nodeBodyBuilder(editorEnabled),
+                          nodeBodyHeight: (node) =>
+                              node.kind == colorModifierKind ? 54 : 0,
+                          onSelectionChanged: (nodeId) =>
+                              setState(() => _selectedNodeId = nodeId),
+                          onNodeMove: editorEnabled ? _moveNode : null,
+                          onConnectionCreate: editorEnabled
+                              ? _connectPorts
+                              : null,
+                          onConnectionRemove: editorEnabled
+                              ? _removeEdge
+                              : null,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 20),
@@ -160,15 +188,6 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
               onRemove: selectedNode == null
                   ? null
                   : () => _removeNode(selectedNode.id),
-            ),
-            const SizedBox(height: 20),
-            _TargetBindingsSection(
-              bindings: _draft.targetBindings,
-              outputPorts: _targetOutputPorts,
-              targetOptions: targetOptions,
-              enabled: editorEnabled,
-              onAdd: _addBinding,
-              onRemove: _removeBinding,
             ),
             const SizedBox(height: 20),
             _MacroDiagnostics(
@@ -211,48 +230,82 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
         (portId, value) => MapEntry<String, String>(portId, switch (value) {
           TriggerGateValue(:final value) => value ? 'ON' : 'OFF',
           TriggerLevelValue(:final value) => value.toStringAsFixed(2),
+          TriggerHsvValue(:final hue) => 'H ${hue.round()}°',
           _ => '',
         }),
       ),
     );
   }
 
-  List<MacroPortDeclaration> get _targetOutputPorts => _draft.nodes
-      .expand((node) => node.ports)
-      .where(
-        (port) =>
-            port.direction == MacroPortDirection.output &&
-            (port.type == MacroPortType.triggerGate ||
-                port.type == MacroPortType.triggerLevel),
-      )
-      .toList(growable: false);
+  Widget? Function(BuildContext, MacroNode) _nodeBodyBuilder(bool enabled) =>
+      (context, node) {
+        if (node.kind != colorModifierKind) return null;
+        try {
+          final configuration = ColorModifierConfiguration.fromNodeParameters(
+            node.parameters,
+          );
+          return _CompactHuePicker(
+            hue: configuration.hue,
+            enabled: enabled,
+            onChanged: (hue) => _updateColorConfiguration(
+              node.id,
+              ColorModifierConfiguration(
+                hue: hue,
+                saturation: configuration.saturation,
+                value: configuration.value,
+              ),
+            ),
+          );
+        } on FormatException {
+          return const Text('Color configuration needs repair.');
+        }
+      };
 
-  List<_MacroTargetOption> _targetOptions({
-    required Iterable<DebugDevice> devices,
-    required Iterable<CustomLightingGroup> customGroups,
-  }) {
-    final groups = <LightingTarget>[
-      ...protocolGroupTargets(devices),
-      ...customGroupTargets(customGroups, devices),
-    ];
-    return <_MacroTargetOption>[
-      ...groups.map(
-        (group) => _MacroTargetOption(
-          kind: MacroTargetKind.group,
-          id: group.id,
-          name: group.name,
-          detail: '${group.memberDeviceIds.length} девайсів',
+  Offset? _dropPositionFor(Offset globalPosition) {
+    final box =
+        _patcherDropKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+    final local = box.globalToLocal(globalPosition);
+    return Offset(
+      (local.dx - 112).clamp(20, 1300).toDouble(),
+      (local.dy - 22).clamp(20, 900).toDouble(),
+    );
+  }
+
+  void _addPaletteItem(_MacroPaletteItem item, [Offset? position]) {
+    final node = switch (item.kind) {
+      _NewNodeKind.microphone => _newMicrophoneNode(),
+      _NewNodeKind.multibandEq => _newEqNode(),
+      _NewNodeKind.color => _newColorNode(),
+      _NewNodeKind.colorBrightnessCombine => _newColorBrightnessCombineNode(),
+      null => _newDeviceTargetNode(item.device!),
+    };
+    if (node == null) {
+      _showError(
+        'У девайса ще немає відомих macro-capabilities. Підключіть його та повторіть.',
+      );
+      return;
+    }
+    final fallbackPosition = Offset(
+      56 + ((_draft.nodes.length % 3) * 250),
+      80 + ((_draft.nodes.length ~/ 3) * 220),
+    );
+    setState(() {
+      _draft = _withDerivedBindings(
+        _draft.copyWith(
+          nodes: <MacroNode>[..._draft.nodes, node],
+          editorPositions: <String, MacroEditorPosition>{
+            ..._draft.editorPositions,
+            node.id: MacroEditorPosition(
+              x: (position ?? fallbackPosition).dx,
+              y: (position ?? fallbackPosition).dy,
+            ),
+          },
         ),
-      ),
-      ...devices.map(
-        (device) => _MacroTargetOption(
-          kind: MacroTargetKind.device,
-          id: device.appDeviceId,
-          name: device.endpoint.displayName ?? device.appDeviceId,
-          detail: device.status.name,
-        ),
-      ),
-    ];
+      );
+      _selectedNodeId = node.id;
+      _error = null;
+    });
   }
 
   MacroNode? _nodeById(String? id) {
@@ -282,29 +335,26 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
               subtitle: const Text('Mono audio → gate or normalized levels'),
               onTap: () => Navigator.of(context).pop(_NewNodeKind.multibandEq),
             ),
+            ListTile(
+              leading: const Icon(Icons.palette_outlined),
+              title: const Text('Color'),
+              subtitle: const Text('Manual HSV colour source'),
+              onTap: () => Navigator.of(context).pop(_NewNodeKind.color),
+            ),
+            ListTile(
+              leading: const Icon(Icons.merge_type_outlined),
+              title: const Text('Color + brightness'),
+              subtitle: const Text('HSV color + level → HSV color'),
+              onTap: () => Navigator.of(
+                context,
+              ).pop(_NewNodeKind.colorBrightnessCombine),
+            ),
           ],
         ),
       ),
     );
     if (!mounted || kind == null) return;
-    setState(() {
-      final node = switch (kind) {
-        _NewNodeKind.microphone => _newMicrophoneNode(),
-        _NewNodeKind.multibandEq => _newEqNode(),
-      };
-      _draft = _draft.copyWith(
-        nodes: <MacroNode>[..._draft.nodes, node],
-        editorPositions: <String, MacroEditorPosition>{
-          ..._draft.editorPositions,
-          node.id: MacroEditorPosition(
-            x: 56 + ((_draft.nodes.length % 3) * 250),
-            y: 80 + ((_draft.nodes.length ~/ 3) * 220),
-          ),
-        },
-      );
-      _selectedNodeId = node.id;
-      _error = null;
-    });
+    _addPaletteItem(_MacroPaletteItem.module(kind));
   }
 
   void _connectPorts(String fromPortId, String toPortId) {
@@ -334,15 +384,17 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
       return;
     }
     setState(() {
-      _draft = _draft.copyWith(
-        edges: <MacroEdge>[
-          ..._draft.edges,
-          MacroEdge(
-            id: const Uuid().v4(),
-            fromPortId: fromPortId,
-            toPortId: toPortId,
-          ),
-        ],
+      _draft = _withDerivedBindings(
+        _draft.copyWith(
+          edges: <MacroEdge>[
+            ..._draft.edges,
+            MacroEdge(
+              id: const Uuid().v4(),
+              fromPortId: fromPortId,
+              toPortId: toPortId,
+            ),
+          ],
+        ),
       );
       _error = null;
     });
@@ -356,8 +408,8 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
   }
 
   void _removeEdge(String edgeId) => setState(() {
-    _draft = _draft.copyWith(
-      edges: _draft.edges.where((edge) => edge.id != edgeId),
+    _draft = _withDerivedBindings(
+      _draft.copyWith(edges: _draft.edges.where((edge) => edge.id != edgeId)),
     );
   });
 
@@ -379,17 +431,16 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
         const <String>{};
     final positions = <String, MacroEditorPosition>{..._draft.editorPositions}
       ..remove(nodeId);
-    _draft = _draft.copyWith(
-      nodes: _draft.nodes.where((node) => node.id != nodeId),
-      edges: _draft.edges.where(
-        (edge) =>
-            !portIds.contains(edge.fromPortId) &&
-            !portIds.contains(edge.toPortId),
+    _draft = _withDerivedBindings(
+      _draft.copyWith(
+        nodes: _draft.nodes.where((node) => node.id != nodeId),
+        edges: _draft.edges.where(
+          (edge) =>
+              !portIds.contains(edge.fromPortId) &&
+              !portIds.contains(edge.toPortId),
+        ),
+        editorPositions: positions,
       ),
-      targetBindings: _draft.targetBindings.where(
-        (binding) => !portIds.contains(binding.sourcePortId),
-      ),
-      editorPositions: positions,
     );
     _selectedNodeId = _draft.nodes.firstOrNull?.id;
   });
@@ -410,78 +461,176 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
         .map((port) => port.id)
         .toSet();
     setState(() {
-      _draft = _draft.copyWith(
-        nodes: updatedNodes,
-        edges: _draft.edges.where(
-          (edge) =>
-              (!replacedPortIds.contains(edge.fromPortId) &&
-                  !replacedPortIds.contains(edge.toPortId)) ||
-              (allPortIds.contains(edge.fromPortId) &&
-                  allPortIds.contains(edge.toPortId)),
+      _draft = _withDerivedBindings(
+        _draft.copyWith(
+          nodes: updatedNodes,
+          edges: _draft.edges.where(
+            (edge) =>
+                (!replacedPortIds.contains(edge.fromPortId) &&
+                    !replacedPortIds.contains(edge.toPortId)) ||
+                (allPortIds.contains(edge.fromPortId) &&
+                    allPortIds.contains(edge.toPortId)),
+          ),
         ),
-        targetBindings: _draft.targetBindings
-            .where(
-              (binding) =>
-                  !replacedPortIds.contains(binding.sourcePortId) ||
-                  allPortIds.contains(binding.sourcePortId),
-            )
-            .toList(growable: false),
       );
       _error = null;
     });
   }
 
-  Future<void> _addBinding() async {
-    final devices = ref.read(debugDevicesProvider).devices.values;
-    final customGroups = ref.read(customGroupsProvider).groups;
-    final binding = await showDialog<MacroTargetBinding>(
-      context: context,
-      builder: (_) => _MacroBindingDialog(
-        ports: _targetOutputPorts,
-        targets: _targetOptions(devices: devices, customGroups: customGroups),
-      ),
-    );
-    if (!mounted || binding == null) return;
-    if (_draft.targetBindings.any(
-      (current) =>
-          current.sourcePortId == binding.sourcePortId &&
-          current.targetKind == binding.targetKind &&
-          current.targetId == binding.targetId &&
-          current.parameter == binding.parameter,
-    )) {
-      _showError('Такий binding уже є.');
-      return;
-    }
+  void _updateColorConfiguration(
+    String nodeId,
+    ColorModifierConfiguration configuration,
+  ) {
     setState(() {
-      _draft = _draft.copyWith(
-        targetBindings: <MacroTargetBinding>[..._draft.targetBindings, binding],
+      _draft = _withDerivedBindings(
+        _draft.copyWith(
+          nodes: _draft.nodes
+              .map(
+                (node) => node.id == nodeId
+                    ? node.copyWith(
+                        parameters: configuration.toNodeParameters(),
+                        ports: ColorModifierFactory.portsForNode(node.id),
+                      )
+                    : node,
+              )
+              .toList(growable: false),
+        ),
       );
       _error = null;
     });
   }
 
-  void _removeBinding(String bindingId) => setState(() {
-    _draft = _draft.copyWith(
-      targetBindings: _draft.targetBindings.where(
-        (binding) => binding.id != bindingId,
-      ),
+  /// Derives portable lighting intents from graph edges that terminate at an
+  /// input-only target node. The persisted binding is still the runtime
+  /// delivery contract, while the editor exposes it only through the patcher.
+  MacroGraph _withDerivedBindings(MacroGraph graph) =>
+      graph.copyWith(targetBindings: _deriveTargetBindings(graph));
+
+  List<MacroTargetBinding> _deriveTargetBindings(MacroGraph graph) {
+    final nodesByInputPort = <String, _TargetInput>{};
+    for (final node in graph.nodes) {
+      if (node.kind != lightingTargetSinkKind) continue;
+      try {
+        final configuration = LightingTargetNodeConfiguration.fromNode(node);
+        for (final parameter in configuration.parameters) {
+          nodesByInputPort['${node.id}.${parameter.name}'] = _TargetInput(
+            targetKind: configuration.targetKind,
+            targetId: configuration.targetId,
+            parameter: parameter,
+          );
+        }
+      } on FormatException {
+        // The graph validator reports malformed sink configuration as a
+        // repairable node-contract issue. Do not manufacture a runtime target.
+      }
+    }
+    return graph.edges
+        .map((edge) {
+          final target = nodesByInputPort[edge.toPortId];
+          if (target == null) return null;
+          return MacroTargetBinding(
+            id: 'target-edge-${edge.id}',
+            sourcePortId: edge.fromPortId,
+            targetKind: target.targetKind,
+            targetId: target.targetId,
+            parameter: target.parameter,
+          );
+        })
+        .whereType<MacroTargetBinding>()
+        .toList(growable: false);
+  }
+
+  /// Keeps older macro JSON editable after the binding form was replaced by
+  /// physical target nodes. Existing target edges are left intact; only legacy
+  /// bindings with no corresponding edge gain a sink node and connection.
+  MacroGraph _migrateLegacyBindings(MacroGraph graph) {
+    final existingKeys = _deriveTargetBindings(graph).map(_bindingKey).toSet();
+    final legacy = graph.targetBindings
+        .where((binding) => !existingKeys.contains(_bindingKey(binding)))
+        .toList(growable: false);
+    if (legacy.isEmpty) return _withDerivedBindings(graph);
+
+    final nodes = <MacroNode>[...graph.nodes];
+    final edges = <MacroEdge>[...graph.edges];
+    final positions = <String, MacroEditorPosition>{...graph.editorPositions};
+    for (final binding in legacy) {
+      MacroNode? targetNode;
+      for (final candidate in nodes) {
+        if (candidate.kind != lightingTargetSinkKind) continue;
+        try {
+          final configuration = LightingTargetNodeConfiguration.fromNode(
+            candidate,
+          );
+          final inputId = '${candidate.id}.${binding.parameter.name}';
+          if (configuration.targetKind == binding.targetKind &&
+              configuration.targetId == binding.targetId &&
+              configuration.parameters.contains(binding.parameter) &&
+              !edges.any((edge) => edge.toPortId == inputId)) {
+            targetNode = candidate;
+            break;
+          }
+        } on FormatException {
+          // Invalid persisted nodes remain untouched and visibly repairable.
+        }
+      }
+      targetNode ??= _newTargetNode(
+        targetKind: binding.targetKind,
+        targetId: binding.targetId,
+        displayName: binding.targetKind == MacroTargetKind.device
+            ? 'Device ${binding.targetId}'
+            : 'Group ${binding.targetId}',
+        parameters: <MacroTargetParameter>[binding.parameter],
+      );
+      if (!nodes.any((node) => node.id == targetNode!.id)) {
+        nodes.add(targetNode);
+        positions[targetNode.id] = MacroEditorPosition(
+          x: 600 + ((nodes.length % 2) * 250),
+          y: 80 + ((nodes.length ~/ 2) * 180),
+        );
+      }
+      edges.add(
+        MacroEdge(
+          id: const Uuid().v4(),
+          fromPortId: binding.sourcePortId,
+          toPortId: '${targetNode.id}.${binding.parameter.name}',
+        ),
+      );
+    }
+    return _withDerivedBindings(
+      graph.copyWith(nodes: nodes, edges: edges, editorPositions: positions),
     );
-  });
+  }
+
+  String _bindingKey(MacroTargetBinding binding) =>
+      '${binding.sourcePortId}|${binding.targetKind.name}|${binding.targetId}|${binding.parameter.name}';
 
   Future<void> _save() async {
+    final saved = await _persistDraft();
+    if (saved && _isNew && mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  /// Persists exactly the graph currently rendered by the editor.
+  ///
+  /// A runtime deliberately reads its definition from the macro library rather
+  /// than from this widget's mutable draft. Keeping this boundary avoids a
+  /// running graph changing below the runtime, but it also means Start must
+  /// synchronise the draft first (notably for source settings such as hue).
+  Future<bool> _persistDraft() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       _showError('Вкажіть назву macro.');
-      return;
+      return false;
     }
     setState(() {
       _saving = true;
       _error = null;
-      _draft = _draft.copyWith(name: name);
+      _draft = _withDerivedBindings(_draft.copyWith(name: name));
     });
     final saved = await ref.read(macroLibraryProvider.notifier).save(_draft);
     if (!mounted) {
-      return;
+      return false;
     }
     setState(() {
       _saving = false;
@@ -491,14 +640,21 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
             'Не вдалося зберегти macro.';
       }
     });
-    if (saved && _isNew && mounted) {
-      Navigator.of(context).pop();
-    }
+    return saved;
   }
 
   Future<void> _start() async {
     if (_isNew) {
       _showError('Спершу збережіть macro.');
+      return;
+    }
+    // The runtime is intentionally constructed from persisted data. Make a
+    // Start action include the visible draft so the selected Color modifier
+    // hue cannot be replaced by an older (often default H 0) saved value.
+    if (!await _persistDraft()) {
+      return;
+    }
+    if (!mounted) {
       return;
     }
     await ref.read(macroRuntimeSessionsProvider.notifier).start(_draft.id);
@@ -510,7 +666,19 @@ class _MacroEditorPageState extends ConsumerState<MacroEditorPage> {
   void _showError(String error) => setState(() => _error = error);
 }
 
-enum _NewNodeKind { microphone, multibandEq }
+enum _NewNodeKind { microphone, multibandEq, color, colorBrightnessCombine }
+
+final class _TargetInput {
+  const _TargetInput({
+    required this.targetKind,
+    required this.targetId,
+    required this.parameter,
+  });
+
+  final MacroTargetKind targetKind;
+  final String targetId;
+  final MacroTargetParameter parameter;
+}
 
 MacroGraph _initialMacro() {
   final microphone = _newMicrophoneNode();
@@ -589,6 +757,70 @@ MacroNode _newEqNode() {
     kind: multibandEqTriggerKind,
     displayName: 'Multiband EQ',
     ports: _eqPorts(id, configuration),
+    parameters: configuration.toNodeParameters(),
+  );
+}
+
+MacroNode _newColorNode() {
+  final id = const Uuid().v4();
+  final configuration = ColorModifierConfiguration();
+  return MacroNode(
+    id: id,
+    kind: colorModifierKind,
+    displayName: 'Color',
+    ports: ColorModifierFactory.portsForNode(id),
+    parameters: configuration.toNodeParameters(),
+  );
+}
+
+MacroNode _newColorBrightnessCombineNode() {
+  final id = const Uuid().v4();
+  return MacroNode(
+    id: id,
+    kind: colorBrightnessCombineModifierKind,
+    displayName: 'Color + brightness',
+    ports: ColorBrightnessCombineModifierFactory.portsForNode(id),
+  );
+}
+
+MacroNode? _newDeviceTargetNode(DebugDevice device) {
+  final capabilities = device.capabilities;
+  if (capabilities == null) return null;
+  final parameters = <MacroTargetParameter>[
+    if (capabilities.supports(LightingFeature.power, allowInferred: true))
+      MacroTargetParameter.power,
+    if (capabilities.supports(LightingFeature.brightness, allowInferred: true))
+      MacroTargetParameter.brightness,
+    if (capabilities.supports(LightingFeature.rgb, allowInferred: true) ||
+        capabilities.supports(LightingFeature.rgbw, allowInferred: true))
+      MacroTargetParameter.color,
+  ];
+  if (parameters.isEmpty) return null;
+  return _newTargetNode(
+    targetKind: MacroTargetKind.device,
+    targetId: device.appDeviceId,
+    displayName: device.endpoint.displayName ?? device.appDeviceId,
+    parameters: parameters,
+  );
+}
+
+MacroNode _newTargetNode({
+  required MacroTargetKind targetKind,
+  required String targetId,
+  required String displayName,
+  required List<MacroTargetParameter> parameters,
+}) {
+  final id = const Uuid().v4();
+  final configuration = LightingTargetNodeConfiguration(
+    targetKind: targetKind,
+    targetId: targetId,
+    parameters: parameters,
+  );
+  return MacroNode(
+    id: id,
+    kind: lightingTargetSinkKind,
+    displayName: displayName,
+    ports: configuration.portsForNode(id),
     parameters: configuration.toNodeParameters(),
   );
 }
@@ -930,194 +1162,238 @@ class _MicrophoneDbMeterPainter extends CustomPainter {
       oldDelegate.dbfs != dbfs;
 }
 
-class _TargetBindingsSection extends StatelessWidget {
-  const _TargetBindingsSection({
-    required this.bindings,
-    required this.outputPorts,
-    required this.targetOptions,
+class _MacroPaletteItem {
+  const _MacroPaletteItem.module(this.kind) : device = null;
+  const _MacroPaletteItem.device(this.device) : kind = null;
+
+  final _NewNodeKind? kind;
+  final DebugDevice? device;
+}
+
+/// The palette is intentionally presentation-only. A drop or tap delegates
+/// graph mutation to the editor; it never creates runtime instances itself.
+class _MacroPalette extends StatelessWidget {
+  const _MacroPalette({
+    required this.devices,
     required this.enabled,
     required this.onAdd,
-    required this.onRemove,
   });
-  final List<MacroTargetBinding> bindings;
-  final List<MacroPortDeclaration> outputPorts;
-  final List<_MacroTargetOption> targetOptions;
+
+  final List<DebugDevice> devices;
   final bool enabled;
-  final Future<void> Function() onAdd;
-  final ValueChanged<String> onRemove;
+  final ValueChanged<_MacroPaletteItem> onAdd;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: <Widget>[
-      Row(
-        children: <Widget>[
-          Expanded(
-            child: Text(
-              'Target bindings',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+  Widget build(BuildContext context) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: ListView(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      children: <Widget>[
+        const Padding(
+          padding: EdgeInsets.fromLTRB(12, 6, 12, 4),
+          child: Text('Modules', style: TextStyle(fontWeight: FontWeight.w700)),
+        ),
+        _MacroPaletteEntry(
+          item: const _MacroPaletteItem.module(_NewNodeKind.microphone),
+          icon: Icons.mic_none_outlined,
+          title: 'Microphone',
+          subtitle: 'Mono audio input',
+          enabled: enabled,
+          onAdd: onAdd,
+        ),
+        _MacroPaletteEntry(
+          item: const _MacroPaletteItem.module(_NewNodeKind.multibandEq),
+          icon: Icons.graphic_eq,
+          title: 'Multiband EQ',
+          subtitle: 'Audio analysis trigger',
+          enabled: enabled,
+          onAdd: onAdd,
+        ),
+        _MacroPaletteEntry(
+          item: const _MacroPaletteItem.module(_NewNodeKind.color),
+          icon: Icons.palette_outlined,
+          title: 'Color',
+          subtitle: 'HSV source',
+          enabled: enabled,
+          onAdd: onAdd,
+        ),
+        _MacroPaletteEntry(
+          item: const _MacroPaletteItem.module(
+            _NewNodeKind.colorBrightnessCombine,
           ),
-          TextButton.icon(
-            key: const Key('add-macro-binding'),
-            onPressed:
-                enabled && outputPorts.isNotEmpty && targetOptions.isNotEmpty
-                ? () => unawaited(onAdd())
-                : null,
-            icon: const Icon(Icons.add_link),
-            label: const Text('Binding'),
-          ),
-        ],
-      ),
-      const Text('Gate керує power; normalized level керує brightness.'),
-      const SizedBox(height: 8),
-      if (bindings.isEmpty)
-        const _EditorHint(
-          text: 'Ще немає bindings. Підключіть EQ band до групи або девайса.',
-        )
-      else
-        ...bindings.map((binding) {
-          final port = outputPorts
-              .where((port) => port.id == binding.sourcePortId)
-              .firstOrNull;
-          final target = targetOptions
-              .where(
-                (option) =>
-                    option.kind == binding.targetKind &&
-                    option.id == binding.targetId,
-              )
-              .firstOrNull;
-          return Card(
-            child: ListTile(
-              key: ValueKey<String>('macro-binding-${binding.id}'),
-              leading: Icon(
-                binding.targetKind == MacroTargetKind.group
-                    ? Icons.group_outlined
-                    : Icons.devices_outlined,
-              ),
-              title: Text(
-                target?.name ?? 'Missing target: ${binding.targetId}',
-              ),
-              subtitle: Text(
-                '${port?.displayName ?? 'Missing port'} → ${binding.parameter.name}'
-                '${target == null ? ' · needs repair' : ''}',
-              ),
-              trailing: IconButton(
-                tooltip: 'Прибрати binding',
-                onPressed: enabled ? () => onRemove(binding.id) : null,
-                icon: const Icon(Icons.link_off),
-              ),
-            ),
-          );
-        }),
-    ],
+          icon: Icons.merge_type_outlined,
+          title: 'Color + brightness',
+          subtitle: 'HSV Value combiner',
+          enabled: enabled,
+          onAdd: onAdd,
+        ),
+        const Divider(),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(12, 6, 12, 4),
+          child: Text('Devices', style: TextStyle(fontWeight: FontWeight.w700)),
+        ),
+        if (devices.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text('No discovered devices.'),
+          )
+        else
+          ...devices.map((device) {
+            final available = device.capabilities != null && enabled;
+            return _MacroPaletteEntry(
+              item: _MacroPaletteItem.device(device),
+              icon: Icons.lightbulb_outline,
+              title: device.endpoint.displayName ?? device.appDeviceId,
+              subtitle: available
+                  ? '${device.status.name} · drag to add inputs'
+                  : 'Connect to load capabilities',
+              enabled: available,
+              onAdd: onAdd,
+            );
+          }),
+      ],
+    ),
   );
 }
 
-class _MacroBindingDialog extends StatefulWidget {
-  const _MacroBindingDialog({required this.ports, required this.targets});
-  final List<MacroPortDeclaration> ports;
-  final List<_MacroTargetOption> targets;
+class _MacroPaletteEntry extends StatelessWidget {
+  const _MacroPaletteEntry({
+    required this.item,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.enabled,
+    required this.onAdd,
+  });
 
-  @override
-  State<_MacroBindingDialog> createState() => _MacroBindingDialogState();
-}
-
-class _MacroBindingDialogState extends State<_MacroBindingDialog> {
-  late MacroPortDeclaration _port;
-  late _MacroTargetOption _target;
-
-  @override
-  void initState() {
-    super.initState();
-    _port = widget.ports.first;
-    _target = widget.targets.first;
-  }
+  final _MacroPaletteItem item;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool enabled;
+  final ValueChanged<_MacroPaletteItem> onAdd;
 
   @override
   Widget build(BuildContext context) {
-    final parameter = _port.type == MacroPortType.triggerGate
-        ? MacroTargetParameter.power
-        : MacroTargetParameter.brightness;
-    return AlertDialog(
-      title: const Text('Новий target binding'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          DropdownButtonFormField<MacroPortDeclaration>(
-            initialValue: _port,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Output',
-              border: OutlineInputBorder(),
-            ),
-            items: widget.ports
-                .map(
-                  (port) => DropdownMenuItem(
-                    value: port,
-                    child: Text(
-                      '${port.displayName ?? port.displayIdentifier} · ${port.type.name}',
-                    ),
-                  ),
-                )
-                .toList(growable: false),
-            onChanged: (port) => setState(() => _port = port!),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<_MacroTargetOption>(
-            initialValue: _target,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Group or device',
-              border: OutlineInputBorder(),
-            ),
-            items: widget.targets
-                .map(
-                  (target) => DropdownMenuItem(
-                    value: target,
-                    child: Text('${target.name} · ${target.detail}'),
-                  ),
-                )
-                .toList(growable: false),
-            onChanged: (target) => setState(() => _target = target!),
-          ),
-          const SizedBox(height: 10),
-          Text('Parameter: ${parameter.name}'),
-        ],
+    final tile = ListTile(
+      dense: true,
+      enabled: enabled,
+      leading: Icon(icon),
+      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+      onTap: enabled ? () => onAdd(item) : null,
+    );
+    if (!enabled) return tile;
+    return Draggable<_MacroPaletteItem>(
+      data: item,
+      feedback: Material(
+        elevation: 6,
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 220,
+          child: ListTile(dense: true, leading: Icon(icon), title: Text(title)),
+        ),
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Скасувати'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(
-            MacroTargetBinding(
-              id: const Uuid().v4(),
-              sourcePortId: _port.id,
-              targetKind: _target.kind,
-              targetId: _target.id,
-              parameter: parameter,
-            ),
-          ),
-          child: const Text('Додати'),
-        ),
-      ],
+      childWhenDragging: Opacity(opacity: 0.45, child: tile),
+      child: tile,
     );
   }
 }
 
-class _MacroTargetOption {
-  const _MacroTargetOption({
-    required this.kind,
-    required this.id,
-    required this.name,
-    required this.detail,
+/// A small direct-manipulation hue control for the colour source node.
+///
+/// Saturation and value intentionally remain 1 in this first source modifier;
+/// a downstream Color + brightness node owns animated HSV Value.
+class _CompactHuePicker extends StatelessWidget {
+  const _CompactHuePicker({
+    required this.hue,
+    required this.enabled,
+    required this.onChanged,
   });
-  final MacroTargetKind kind;
-  final String id;
-  final String name;
-  final String detail;
+
+  final double hue;
+  final bool enabled;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      void update(Offset localPosition) {
+        if (!enabled || constraints.maxWidth <= 0) return;
+        onChanged(
+          (localPosition.dx.clamp(0, constraints.maxWidth) /
+                  constraints.maxWidth *
+                  360)
+              .toDouble(),
+        );
+      }
+
+      final thumbAlignment = (hue / 180 - 1).clamp(-1.0, 1.0).toDouble();
+      return Semantics(
+        label: 'Color hue ${hue.round()} degrees',
+        slider: true,
+        child: GestureDetector(
+          onTapDown: enabled
+              ? (details) => update(details.localPosition)
+              : null,
+          onHorizontalDragUpdate: enabled
+              ? (details) => update(details.localPosition)
+              : null,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(9),
+              gradient: const LinearGradient(
+                colors: <Color>[
+                  Colors.red,
+                  Colors.yellow,
+                  Colors.green,
+                  Colors.cyan,
+                  Colors.blue,
+                  Colors.purple,
+                  Colors.red,
+                ],
+              ),
+            ),
+            child: Stack(
+              alignment: Alignment(thumbAlignment, 0),
+              children: <Widget>[
+                const SizedBox.expand(),
+                Container(
+                  width: 18,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: HSVColor.fromAHSV(1, hue, 1, 1).toColor(),
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: const <BoxShadow>[
+                      BoxShadow(blurRadius: 2, color: Color(0x99000000)),
+                    ],
+                  ),
+                ),
+                Align(
+                  alignment: const Alignment(0, 1),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 1),
+                    child: Text(
+                      'H ${hue.round()}°',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        shadows: <Shadow>[
+                          Shadow(color: Colors.black, blurRadius: 2),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _MacroDiagnostics extends StatelessWidget {

@@ -91,12 +91,15 @@ captured, so this is not a compatibility promise for future matches. Automated
 integration is covered by mock transport tests; it is not a replacement for
 physical-protocol validation.
 
-For the current Lotus X control surface, the colour picker deliberately emits
-only fully saturated colours on the red-to-violet arc. It does not offer white
-or black as `SetColor` values. Brightness is a separate command and can still
-make the displayed colour dark. Drag updates are sampled at most once per
-100 ms with replacement of stale pending values; this is a local UI safeguard,
-not the centralized scheduler required by the full specification.
+For the current Lotus X control surface, the ordinary colour picker deliberately
+emits only fully saturated colours on the red-to-violet arc. It does not offer
+white or black as direct `SetColor` values. Macro HSV routing is separate: a
+zero HSV Value produces a black RGB `ApplyLightingState` frame, which the user
+has reported fully turns off the locally tested strips. It is deliberately not
+translated to `SetBrightness(0)`, because that command leaves those strips
+minimally lit. Drag updates are sampled at most once per 100 ms with replacement
+of stale pending values; this is a local UI safeguard, not the centralized
+scheduler required by the full specification.
 
 The app can optionally apply a manual, per-device hue curve to that same
 red-to-violet command arc. It is a local, best-effort correction for nonlinear
@@ -144,3 +147,4 @@ identifier, user location, or unrelated nearby-device data.
 | Date | Device/profile | Operation | Result | Rate/notes |
 | --- | --- | --- | --- | --- |
 | 2026-10-23 | Two locally tested strips; model/firmware not recorded | Auto-connect and app lighting commands | User reported both devices received commands | Exact command set and sustained rate pending |
+| 2026-10-24 | Two locally tested strips; model/firmware not recorded | Macro HSV Value `0` → black RGB `ApplyLightingState` | User reported both strips fully turned off | `SetBrightness(0)` instead leaves minimum visible light; no rate or firmware record |

@@ -72,6 +72,13 @@ derived spectrum telemetry; repository fakes implement the same delete
 contract as file storage. Patcher gesture, picker and actual microphone/EQ
 delivery remain manual UI and hardware validation, not synthetic claims.
 
+The colour-modifier slice adds only contract/conformance coverage: HSV range
+validation, HSV→colour target compatibility, a colour-source emission and the
+colour-plus-level HSV Value composition, plus the application bridge's HSV to
+shared-RGB conversion. Drag/drop presentation and physical Lotus Lamp X colour
+response remain manual/hardware validation rather than a broad widget or mock
+hardware test suite.
+
 ## Hardware validation still required
 
 Automated tests do not validate every actual BLE controller. Two strips were

@@ -113,6 +113,27 @@ void main() {
     },
   );
 
+  test('encodes black ApplyLightingState as a black RGB frame', () async {
+    final transport = _RecordingTransportSession();
+    final adapter = LotusLampXProtocolAdapter(allowUnverifiedCommands: true);
+    final device = await adapter.openSession(
+      transport,
+      const ProtocolProbeResult(status: ProtocolProbeStatus.unverified),
+    );
+
+    final result = await device.execute(
+      ApplyLightingState(DesiredLightingState(color: RgbColor(0, 0, 0))),
+    );
+
+    expect(result.outcome, CommandOutcome.transmitted);
+    expect(
+      transport.sentMessages.single.payload,
+      orderedEquals(LotusLampXFrameCodec.color(0, 0, 0)),
+    );
+    await device.close();
+    await transport.dispose();
+  });
+
   test(
     'requests the declared FFF4 channel and emits a decoded observation',
     () async {

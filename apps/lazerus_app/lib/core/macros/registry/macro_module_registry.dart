@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lazerus_core/lazerus_core.dart';
 
+import '../modifiers/color/color_modifier.dart';
+import '../modifiers/color_brightness_combine/color_brightness_combine_modifier.dart';
+import '../sinks/lighting_target_sink.dart';
 import '../triggers/microphone/microphone_mono_audio_trigger.dart';
 import '../triggers/microphone/microphone_pcm_session.dart';
 import '../triggers/multiband_eq/multiband_eq_trigger.dart';
@@ -41,4 +44,7 @@ MacroModuleRegistry createMacroModuleRegistry({
   MultibandEqTriggerFactory? multibandEq,
 }) => MacroModuleRegistry()
   ..register(microphone ?? MicrophoneMonoAudioTriggerFactory())
-  ..register(multibandEq ?? MultibandEqTriggerFactory());
+  ..register(multibandEq ?? MultibandEqTriggerFactory())
+  ..register(ColorModifierFactory())
+  ..register(ColorBrightnessCombineModifierFactory())
+  ..register(LightingTargetSinkFactory());

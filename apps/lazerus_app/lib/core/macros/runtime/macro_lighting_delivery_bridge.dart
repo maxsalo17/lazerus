@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as developer;
+import 'dart:math' as math;
 
 import 'package:lazerus_core/lazerus_core.dart';
 
@@ -405,8 +406,32 @@ final class MacroLightingDeliveryBridge {
         DesiredLightingState(power: value),
       (MacroTargetParameter.brightness, TriggerLevelValue(:final value)) =>
         DesiredLightingState(brightness: value),
+      (MacroTargetParameter.color, final TriggerHsvValue value) =>
+        DesiredLightingState(color: _rgbFromHsv(value)),
       _ => null,
     };
+  }
+
+  /// Converts the macro's protocol-neutral HSV signal to the shared RGB
+  /// lighting model. The device command path subsequently applies per-device
+  /// calibration before a protocol adapter encodes the command.
+  static RgbColor _rgbFromHsv(TriggerHsvValue hsv) {
+    final hue = hsv.hue == 360 ? 0.0 : hsv.hue;
+    final chroma = hsv.value * hsv.saturation;
+    final segment = hue / 60;
+    final secondary = chroma * (1 - (segment % 2 - 1).abs());
+    final (red, green, blue) = switch (segment.floor()) {
+      0 => (chroma, secondary, 0.0),
+      1 => (secondary, chroma, 0.0),
+      2 => (0.0, chroma, secondary),
+      3 => (0.0, secondary, chroma),
+      4 => (secondary, 0.0, chroma),
+      _ => (chroma, 0.0, secondary),
+    };
+    final match = hsv.value - chroma;
+    int channel(double component) =>
+        (math.max(0, math.min(1, component + match)) * 255).round();
+    return RgbColor(channel(red), channel(green), channel(blue));
   }
 
   static DesiredLightingState _merge(
@@ -447,6 +472,9 @@ final class MacroLightingDeliveryBridge {
   static String _loggableValue(TriggerValue value) => switch (value) {
     TriggerGateValue(:final value) => value.toString(),
     TriggerLevelValue(:final value) => value.toString(),
+    TriggerHsvValue(:final hue, :final saturation, :final value) =>
+      'h=${hue.toStringAsFixed(1)}, s=${saturation.toStringAsFixed(2)}, '
+          'v=${value.toStringAsFixed(2)}',
     _ => '<${value.runtimeType}>',
   };
 }

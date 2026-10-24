@@ -359,7 +359,7 @@ produces a typed lighting intent, never a direct transport write. For reactive
 macro updates, each device accepts exactly one pending or in-flight write;
 newer values are dropped until that write settles, rather than replacing it or
 forming a backlog. A command reported as `transmitted` reaches only the
-transport boundary, not a physical delivery claim. Concrete microphone/EQ
+transport boundary, not a physical delivery claim. Concrete microphone/EQ/colour
 modules and the Scene Macro library,
 patcher editor and explicit start/stop UI are implemented. Selecting a macro
 in a Scene remains an indirect saved reference; it does not by itself claim a
@@ -486,6 +486,13 @@ Concrete macro triggers and modifiers are separate modules registered in the
 application composition root. They communicate only through validated typed
 ports and must not import one another. The Scene Macro plan and the initial
 audio/EQ flow are documented in [`SCENE_MACROS.md`](SCENE_MACROS.md).
+
+The `sink.lighting_target` module is an input-only graph representation of a
+device or group. Its incoming edges derive the portable runtime target binding;
+it performs no I/O. `triggerHsv` remains a macro value until the app delivery
+bridge converts it to the shared RGB state, after which normal calibration and
+protocol encoding apply. This keeps colour modifiers, target nodes and Lotus X
+independent of one another.
 
 The initial microphone module is a narrow PCM16 mono-stream adapter with
 explicit permission/session state, while the Multiband EQ is a pure Dart module

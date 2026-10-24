@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart' show PointerHoverEvent;
 import 'package:flutter/material.dart';
 import 'package:lazerus_core/lazerus_core.dart';
 
@@ -25,6 +27,8 @@ class MacroPatcherCanvas extends StatefulWidget {
     this.onConnectionRemove,
     this.onNodeMove,
     this.onSelectionChanged,
+    this.nodeBodyBuilder,
+    this.nodeBodyHeight,
     this.outputValueLabels = const <String, String>{},
     this.minCanvasSize = const Size(760, 520),
   });
@@ -35,6 +39,14 @@ class MacroPatcherCanvas extends StatefulWidget {
   final MacroConnectionRemove? onConnectionRemove;
   final MacroNodeMove? onNodeMove;
   final MacroNodeSelectionChanged? onSelectionChanged;
+
+  /// Optional compact, node-specific presentation content. It remains a
+  /// callback owned by the editor, so this canvas stays unaware of modifier
+  /// configuration and has no persistence responsibilities.
+  final Widget? Function(BuildContext context, MacroNode node)? nodeBodyBuilder;
+
+  /// Reserved height for [nodeBodyBuilder] before the input/output rows.
+  final double Function(MacroNode node)? nodeBodyHeight;
 
   /// Presentation-only realtime labels, keyed by output port identifier.
   ///
@@ -52,11 +64,22 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
   static const _headerHeight = 44.0;
   static const _portHeight = 32.0;
   static const _padding = 16.0;
-  String? _connectingOutputId;
+  String? _connectingPortId;
   Offset? _connectionPointer;
+  Offset? _lastPointerPosition;
   String? _draggingNodeId;
   Offset _dragOrigin = Offset.zero;
   Offset _nodeOrigin = Offset.zero;
+  final Set<int> _nodeBodyPointers = <int>{};
+
+  /// The graph surface may pan only when a pointer did not begin in an
+  /// interactive node body. This gives embedded controls (for example the
+  /// colour hue picker) ownership of their drag instead of letting the parent
+  /// [InteractiveViewer] win the gesture arena.
+  bool get _canPanOrScale => _nodeBodyPointers.isEmpty;
+
+  bool get _canEditConnections =>
+      widget.onConnectionCreate != null && widget.onConnectionRemove != null;
 
   MacroNodeLayout _layoutFor(MacroNode node) =>
       widget.graph.layouts[node.id] ??
@@ -67,13 +90,21 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
   Size _sizeFor(MacroNode node) {
     final layout = _layoutFor(node);
     final portCount = math.max(1, node.ports.length);
+    final bodyHeight = _bodyHeightFor(node);
     return Size(
       layout.size.width > 0 ? layout.size.width : _nodeWidth,
       layout.size.height > 0
           ? layout.size.height
-          : _headerHeight + _padding + portCount * _portHeight + _padding,
+          : _headerHeight +
+                bodyHeight +
+                _padding +
+                portCount * _portHeight +
+                _padding,
     );
   }
+
+  double _bodyHeightFor(MacroNode node) =>
+      math.max(0, widget.nodeBodyHeight?.call(node) ?? 0);
 
   @override
   Widget build(BuildContext context) {
@@ -95,35 +126,42 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
             boundaryMargin: const EdgeInsets.all(240),
             minScale: 0.55,
             maxScale: 1.8,
-            child: SizedBox(
-              width: size.width,
-              height: size.height,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: <Widget>[
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _PatchCablePainter(
-                        edges: widget.graph.edges,
-                        portCenters: _portCenters(),
-                        outputValueLabels: widget.outputValueLabels,
-                        pendingFrom: _connectingOutputId,
-                        pendingTo: _connectionPointer,
+            panEnabled: _canPanOrScale,
+            scaleEnabled: _canPanOrScale,
+            child: MouseRegion(
+              cursor: _connectingPortId == null
+                  ? MouseCursor.defer
+                  : SystemMouseCursors.precise,
+              onHover: _handlePointerHover,
+              child: SizedBox(
+                width: size.width,
+                height: size.height,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: <Widget>[
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _PatchCablePainter(
+                          edges: widget.graph.edges,
+                          portCenters: _portCenters(),
+                          cableGeometries: _cableGeometries(),
+                          outputValueLabels: widget.outputValueLabels,
+                          pendingFrom: _connectingPortId,
+                          pendingTo: _connectionPointer,
+                        ),
                       ),
                     ),
-                  ),
-                  Positioned.fill(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTapUp: (details) =>
-                          _handleCanvasTap(details.localPosition),
-                      onPanUpdate: _updateConnection,
-                      onPanEnd: (_) => _finishConnection(),
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTapUp: (details) =>
+                            _handleCanvasTap(details.localPosition),
+                      ),
                     ),
-                  ),
-                  for (final node in widget.graph.nodes)
-                    _buildNode(context, node),
-                ],
+                    for (final node in widget.graph.nodes)
+                      _buildNode(context, node),
+                  ],
+                ),
               ),
             ),
           ),
@@ -142,6 +180,7 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
     final outputs = node.ports.where(
       (port) => port.direction == MacroPortDirection.output,
     );
+    final nodeBody = widget.nodeBodyBuilder?.call(context, node);
     return Positioned(
       left: layout.position.dx,
       top: layout.position.dy,
@@ -166,6 +205,7 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
           child: Column(
             children: <Widget>[
               GestureDetector(
+                onTapDown: (_) => _cancelConnection(),
                 onTap: () => widget.onSelectionChanged?.call(node.id),
                 onPanStart: (details) => _startNodeDrag(node, details),
                 onPanUpdate: _updateNodeDrag,
@@ -186,7 +226,7 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          node.displayName ?? node.kind,
+                          _nodeTitle(node),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -194,6 +234,20 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
                   ),
                 ),
               ),
+              if (nodeBody != null)
+                Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: _handleNodeBodyPointerDown,
+                  onPointerUp: _releaseNodeBodyPointer,
+                  onPointerCancel: _releaseNodeBodyPointer,
+                  child: SizedBox(
+                    height: _bodyHeightFor(node),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+                      child: nodeBody,
+                    ),
+                  ),
+                ),
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: _padding / 2),
@@ -224,22 +278,20 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
             height: _portHeight,
             child: GestureDetector(
               key: Key('macro-port-${port.id}'),
-              onTap: () => _handlePortTap(port),
-              onPanStart: output
+              onTapUp: _canEditConnections
                   ? (details) =>
-                        _startConnection(port.id, details.globalPosition)
+                        unawaited(_handlePortTap(port, details.globalPosition))
                   : null,
-              onPanUpdate: output
-                  ? (details) =>
-                        _updateConnectionFromGlobal(details.globalPosition)
-                  : null,
-              onPanEnd: output ? (_) => _finishConnection() : null,
               child: Row(
                 mainAxisAlignment: output
                     ? MainAxisAlignment.end
                     : MainAxisAlignment.start,
                 children: <Widget>[
-                  if (!output) _PortDot(type: port.type),
+                  if (!output)
+                    _PortDot(
+                      type: port.type,
+                      selected: _connectingPortId == port.id,
+                    ),
                   Flexible(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -250,7 +302,11 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
                       ),
                     ),
                   ),
-                  if (output) _PortDot(type: port.type),
+                  if (output)
+                    _PortDot(
+                      type: port.type,
+                      selected: _connectingPortId == port.id,
+                    ),
                 ],
               ),
             ),
@@ -259,7 +315,14 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
         .toList(growable: false),
   );
 
+  String _nodeTitle(MacroNode node) {
+    final index =
+        widget.graph.nodes.indexWhere((item) => item.id == node.id) + 1;
+    return '[$index] ${node.displayName ?? node.kind}';
+  }
+
   void _startNodeDrag(MacroNode node, DragStartDetails details) {
+    _cancelConnection();
     _draggingNodeId = node.id;
     _dragOrigin = details.globalPosition;
     _nodeOrigin = _layoutFor(node).position;
@@ -280,95 +343,210 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
 
   void _endNodeDrag() => _draggingNodeId = null;
 
-  void _handlePortTap(MacroPortDeclaration port) {
-    if (port.direction == MacroPortDirection.output) {
-      setState(() => _connectingOutputId = port.id);
-    } else if (_connectingOutputId != null) {
-      _completeConnection(_connectingOutputId!, port.id);
+  void _handleNodeBodyPointerDown(PointerDownEvent event) {
+    _cancelConnection();
+    _claimNodeBodyPointer(event);
+  }
+
+  void _claimNodeBodyPointer(PointerDownEvent event) {
+    if (_nodeBodyPointers.add(event.pointer) && mounted) {
+      setState(() {});
     }
   }
 
-  void _startConnection(String portId, Offset globalPosition) {
+  void _releaseNodeBodyPointer(PointerEvent event) {
+    if (_nodeBodyPointers.remove(event.pointer) && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handlePointerHover(PointerHoverEvent event) {
+    _lastPointerPosition = event.localPosition;
+    if (_connectingPortId != null) {
+      setState(() => _connectionPointer = event.localPosition);
+    }
+  }
+
+  Future<void> _handlePortTap(
+    MacroPortDeclaration port,
+    Offset globalPosition,
+  ) async {
+    final startPortId = _connectingPortId;
+    if (startPortId != null) {
+      _attemptConnection(startPortId, port.id);
+      return;
+    }
+    final connections = _incidentEdges(port.id);
+    if (connections.isEmpty) {
+      _beginConnection(port.id);
+      return;
+    }
+    if (connections.length == 1) {
+      _detachAndBegin(connections.single, port.id);
+      return;
+    }
+    final selectedEdgeId = await _selectConnectionToDetach(
+      port: port,
+      edges: connections,
+      globalPosition: globalPosition,
+    );
+    if (!mounted || selectedEdgeId == null) return;
+    MacroEdge? selectedEdge;
+    for (final edge in widget.graph.edges) {
+      if (edge.id == selectedEdgeId) {
+        selectedEdge = edge;
+        break;
+      }
+    }
+    if (selectedEdge != null) {
+      _detachAndBegin(selectedEdge, port.id);
+    }
+  }
+
+  void _beginConnection(String portId) {
     setState(() {
-      _connectingOutputId = portId;
-      _connectionPointer = _toLocal(globalPosition);
+      _connectingPortId = portId;
+      _connectionPointer = _lastPointerPosition ?? _portCenters()[portId];
     });
   }
 
-  void _updateConnection(DragUpdateDetails details) {
-    if (_connectingOutputId != null) {
-      setState(() => _connectionPointer = details.localPosition);
+  void _detachAndBegin(MacroEdge edge, String clickedPortId) {
+    final remainingPortId = edge.fromPortId == clickedPortId
+        ? edge.toPortId
+        : edge.fromPortId;
+    widget.onConnectionRemove?.call(edge.id);
+    _beginConnection(remainingPortId);
+  }
+
+  void _attemptConnection(String startPortId, String endPortId) {
+    final connection = _normaliseConnection(startPortId, endPortId);
+    if (connection != null && _canCreateConnection(connection)) {
+      widget.onConnectionCreate?.call(connection.from, connection.to);
     }
+    // An invalid endpoint is deliberately silent and simply drops the cable,
+    // matching the patcher flow rather than leaving a stale selection behind.
+    _cancelConnection();
   }
 
-  void _updateConnectionFromGlobal(Offset globalPosition) {
-    if (_connectingOutputId != null) {
-      setState(() => _connectionPointer = _toLocal(globalPosition));
+  ({String from, String to})? _normaliseConnection(
+    String firstPortId,
+    String secondPortId,
+  ) {
+    if (firstPortId == secondPortId) return null;
+    final first = _portById(firstPortId);
+    final second = _portById(secondPortId);
+    if (first == null || second == null || first.type != second.type) {
+      return null;
     }
+    if (first.direction == MacroPortDirection.output &&
+        second.direction == MacroPortDirection.input) {
+      return (from: first.id, to: second.id);
+    }
+    if (second.direction == MacroPortDirection.output &&
+        first.direction == MacroPortDirection.input) {
+      return (from: second.id, to: first.id);
+    }
+    return null;
   }
 
-  Offset _toLocal(Offset globalPosition) {
-    final box = context.findRenderObject()! as RenderBox;
-    return box.globalToLocal(globalPosition);
+  bool _canCreateConnection(({String from, String to}) connection) {
+    final destination = _portById(connection.to);
+    if (destination == null) return false;
+    if (widget.graph.edges.any(
+      (edge) =>
+          edge.fromPortId == connection.from && edge.toPortId == connection.to,
+    )) {
+      return false;
+    }
+    return destination.acceptsMultipleInputs ||
+        !widget.graph.edges.any((edge) => edge.toPortId == connection.to);
   }
 
-  void _finishConnection() {
-    final from = _connectingOutputId;
-    final point = _connectionPointer;
-    if (from != null && point != null) {
-      final target = _portCenters().entries
-          .where(
-            (entry) =>
-                _isInputPort(entry.key) && (entry.value - point).distance <= 20,
-          )
-          .map((entry) => entry.key)
-          .firstOrNull;
-      if (target != null) {
-        _completeConnection(from, target);
+  MacroPortDeclaration? _portById(String portId) {
+    for (final port in widget.graph.nodes.expand((node) => node.ports)) {
+      if (port.id == portId) return port;
+    }
+    return null;
+  }
+
+  List<MacroEdge> _incidentEdges(String portId) => widget.graph.edges
+      .where((edge) => edge.fromPortId == portId || edge.toPortId == portId)
+      .toList(growable: false);
+
+  Future<String?> _selectConnectionToDetach({
+    required MacroPortDeclaration port,
+    required List<MacroEdge> edges,
+    required Offset globalPosition,
+  }) {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final position = overlay.globalToLocal(globalPosition);
+    return showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, 1, 1),
+        Offset.zero & overlay.size,
+      ),
+      items: <PopupMenuEntry<String>>[
+        const PopupMenuItem<String>(
+          enabled: false,
+          child: Text('Відʼєднати connection'),
+        ),
+        ...edges.map(
+          (edge) => PopupMenuItem<String>(
+            value: edge.id,
+            child: Text(_connectionMenuLabel(edge, port.id)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _connectionMenuLabel(MacroEdge edge, String clickedPortId) {
+    final otherPortId = edge.fromPortId == clickedPortId
+        ? edge.toPortId
+        : edge.fromPortId;
+    final otherPort = _portById(otherPortId);
+    MacroNode? otherNode;
+    for (final node in widget.graph.nodes) {
+      if (node.ports.any((port) => port.id == otherPortId)) {
+        otherNode = node;
+        break;
       }
     }
-    if (mounted) {
-      setState(() {
-        _connectingOutputId = null;
-        _connectionPointer = null;
-      });
-    }
+    if (otherPort == null || otherNode == null) return otherPortId;
+    final sameDirectionPorts = otherNode.ports
+        .where((port) => port.direction == otherPort.direction)
+        .toList(growable: false);
+    final portIndex =
+        sameDirectionPorts.indexWhere((port) => port.id == otherPortId) + 1;
+    final direction = otherPort.direction == MacroPortDirection.input
+        ? 'Вхід'
+        : 'Вихід';
+    return '${_nodeTitle(otherNode)} · $direction $portIndex: '
+        '${otherPort.displayName ?? otherPort.displayIdentifier}';
   }
 
-  void _completeConnection(String from, String to) {
-    widget.onConnectionCreate?.call(from, to);
+  void _cancelConnection() {
+    if (_connectingPortId == null && _connectionPointer == null) return;
     setState(() {
-      _connectingOutputId = null;
+      _connectingPortId = null;
       _connectionPointer = null;
     });
   }
 
-  bool _isInputPort(String id) => widget.graph.nodes
-      .expand((node) => node.ports)
-      .any(
-        (port) => port.id == id && port.direction == MacroPortDirection.input,
-      );
-  void _handleCanvasTap(Offset point) {
-    final hit = widget.graph.edges.where((edge) {
-      final a = _portCenters()[edge.fromPortId];
-      final b = _portCenters()[edge.toPortId];
-      return a != null && b != null && _distanceToSegment(point, a, b) < 10;
-    }).firstOrNull;
-    if (hit != null) {
-      widget.onConnectionRemove?.call(hit.id);
+  void _handleCanvasTap(Offset _) {
+    if (_connectingPortId != null) {
+      _cancelConnection();
       return;
     }
-    if (_connectingOutputId == null) widget.onSelectionChanged?.call(null);
+    widget.onSelectionChanged?.call(null);
   }
 
-  double _distanceToSegment(Offset p, Offset a, Offset b) {
-    final ab = b - a;
-    final lengthSquared = ab.dx * ab.dx + ab.dy * ab.dy;
-    if (lengthSquared == 0) return (p - a).distance;
-    final ap = p - a;
-    final t = ((ap.dx * ab.dx + ap.dy * ab.dy) / lengthSquared).clamp(0.0, 1.0);
-    return (p - (a + ab * t)).distance;
-  }
+  Map<String, _CableGeometry> _cableGeometries() => _buildCableGeometries(
+    edges: widget.graph.edges,
+    portCenters: _portCenters(),
+  );
 
   Map<String, Offset> _portCenters() {
     final result = <String, Offset>{};
@@ -381,6 +559,7 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
         final y =
             layout.position.dy +
             _headerHeight +
+            _bodyHeightFor(node) +
             _padding +
             ((port.direction == MacroPortDirection.input ? input++ : output++) *
                 _portHeight) +
@@ -410,8 +589,9 @@ class _MacroPatcherCanvasState extends State<MacroPatcherCanvas> {
 }
 
 class _PortDot extends StatelessWidget {
-  const _PortDot({required this.type});
+  const _PortDot({required this.type, required this.selected});
   final MacroPortType type;
+  final bool selected;
   @override
   Widget build(BuildContext context) => Container(
     width: 12,
@@ -423,7 +603,14 @@ class _PortDot extends StatelessWidget {
         MacroPortType.triggerArray => Colors.purple,
         MacroPortType.triggerGate => Colors.teal,
         MacroPortType.triggerLevel => Colors.blue,
+        MacroPortType.triggerHsv => Colors.pinkAccent,
       },
+      border: selected ? Border.all(color: Colors.white, width: 2) : null,
+      boxShadow: selected
+          ? const <BoxShadow>[
+              BoxShadow(color: Color(0xCC89B4FA), blurRadius: 8),
+            ]
+          : null,
     ),
   );
 }
@@ -432,12 +619,14 @@ class _PatchCablePainter extends CustomPainter {
   const _PatchCablePainter({
     required this.edges,
     required this.portCenters,
+    required this.cableGeometries,
     required this.outputValueLabels,
     this.pendingFrom,
     this.pendingTo,
   });
   final List<MacroEdge> edges;
   final Map<String, Offset> portCenters;
+  final Map<String, _CableGeometry> cableGeometries;
   final Map<String, String> outputValueLabels;
   final String? pendingFrom;
   final Offset? pendingTo;
@@ -448,13 +637,12 @@ class _PatchCablePainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.5;
     for (final edge in edges) {
-      final from = portCenters[edge.fromPortId];
-      final to = portCenters[edge.toPortId];
-      if (from != null && to != null) {
-        _curve(canvas, paint, from, to);
+      final geometry = cableGeometries[edge.id];
+      if (geometry != null) {
+        _curve(canvas, paint, geometry);
         final label = outputValueLabels[edge.fromPortId];
         if (label != null && label.isNotEmpty) {
-          _label(canvas, label, _curveMidpoint(from, to));
+          _label(canvas, label, geometry.pointAt(0.5));
         }
       }
     }
@@ -462,36 +650,13 @@ class _PatchCablePainter extends CustomPainter {
     if (from != null && pendingTo != null) {
       paint.color = const Color(0xFF89B4FA);
       paint.strokeWidth = 2;
-      _curve(canvas, paint, from, pendingTo!);
+      _curve(canvas, paint, _CableGeometry.single(from: from, to: pendingTo!));
     }
   }
 
-  void _curve(Canvas canvas, Paint paint, Offset from, Offset to) {
-    final distance = (to.dx - from.dx).abs();
-    final path = Path()
-      ..moveTo(from.dx, from.dy)
-      ..cubicTo(
-        from.dx + math.max(48, distance / 2),
-        from.dy,
-        to.dx - math.max(48, distance / 2),
-        to.dy,
-        to.dx,
-        to.dy,
-      );
+  void _curve(Canvas canvas, Paint paint, _CableGeometry geometry) {
+    final path = geometry.toPath();
     canvas.drawPath(path, paint);
-  }
-
-  Offset _curveMidpoint(Offset from, Offset to) {
-    final distance = (to.dx - from.dx).abs();
-    final controlOffset = math.max(48, distance / 2);
-    final controlA = Offset(from.dx + controlOffset, from.dy);
-    final controlB = Offset(to.dx - controlOffset, to.dy);
-    const t = 0.5;
-    final inverseT = 1 - t;
-    return from * (inverseT * inverseT * inverseT) +
-        controlA * (3 * inverseT * inverseT * t) +
-        controlB * (3 * inverseT * t * t) +
-        to * (t * t * t);
   }
 
   void _label(Canvas canvas, String value, Offset cableMidpoint) {
@@ -532,7 +697,86 @@ class _PatchCablePainter extends CustomPainter {
   bool shouldRepaint(covariant _PatchCablePainter old) =>
       old.edges != edges ||
       old.portCenters != portCenters ||
+      old.cableGeometries != cableGeometries ||
       old.outputValueLabels != outputValueLabels ||
       old.pendingFrom != pendingFrom ||
       old.pendingTo != pendingTo;
 }
+
+/// Geometry for painting a cable. Fan lanes make concurrent cables visibly
+/// distinct beside a shared port.
+final class _CableGeometry {
+  const _CableGeometry({
+    required this.from,
+    required this.controlA,
+    required this.controlB,
+    required this.to,
+  });
+
+  factory _CableGeometry.single({required Offset from, required Offset to}) {
+    final horizontalDirection = to.dx >= from.dx ? 1.0 : -1.0;
+    final controlDistance = math.max(48.0, (to.dx - from.dx).abs() / 2);
+    return _CableGeometry(
+      from: from,
+      controlA: from + Offset(horizontalDirection * controlDistance, 0),
+      controlB: to - Offset(horizontalDirection * controlDistance, 0),
+      to: to,
+    );
+  }
+
+  final Offset from;
+  final Offset controlA;
+  final Offset controlB;
+  final Offset to;
+
+  Path toPath() => Path()
+    ..moveTo(from.dx, from.dy)
+    ..cubicTo(controlA.dx, controlA.dy, controlB.dx, controlB.dy, to.dx, to.dy);
+
+  Offset pointAt(double t) {
+    final inverseT = 1 - t;
+    return from * (inverseT * inverseT * inverseT) +
+        controlA * (3 * inverseT * inverseT * t) +
+        controlB * (3 * inverseT * t * t) +
+        to * (t * t * t);
+  }
+}
+
+Map<String, _CableGeometry> _buildCableGeometries({
+  required Iterable<MacroEdge> edges,
+  required Map<String, Offset> portCenters,
+}) {
+  final edgeList = edges.toList(growable: false);
+  final result = <String, _CableGeometry>{};
+  for (final edge in edgeList) {
+    final from = portCenters[edge.fromPortId];
+    final to = portCenters[edge.toPortId];
+    if (from == null || to == null) continue;
+    final sourceEdges = edgeList
+        .where((candidate) => candidate.fromPortId == edge.fromPortId)
+        .toList(growable: false);
+    final targetEdges = edgeList
+        .where((candidate) => candidate.toPortId == edge.toPortId)
+        .toList(growable: false);
+    final sourceLane = _fanLane(
+      sourceEdges.indexWhere((candidate) => candidate.id == edge.id),
+      sourceEdges.length,
+    );
+    final targetLane = _fanLane(
+      targetEdges.indexWhere((candidate) => candidate.id == edge.id),
+      targetEdges.length,
+    );
+    final horizontalDirection = to.dx >= from.dx ? 1.0 : -1.0;
+    final controlDistance = math.max(48.0, (to.dx - from.dx).abs() / 2);
+    result[edge.id] = _CableGeometry(
+      from: from,
+      controlA:
+          from + Offset(horizontalDirection * controlDistance, sourceLane),
+      controlB: to - Offset(horizontalDirection * controlDistance, targetLane),
+      to: to,
+    );
+  }
+  return result;
+}
+
+double _fanLane(int index, int count) => (index - ((count - 1) / 2)) * 18;

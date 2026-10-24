@@ -30,6 +30,21 @@ void main() {
       expect(value.values, <double>[0.1]);
       expect(() => value.values.add(0.2), throwsUnsupportedError);
     });
+
+    test('keeps HSV values typed and bounded', () {
+      final value = TriggerHsvValue(hue: 180, saturation: 0.75, value: 0.5);
+
+      expect(value.portType, MacroPortType.triggerHsv);
+      expect(value.hue, 180);
+      expect(
+        () => TriggerHsvValue(hue: 361, saturation: 1, value: 1),
+        throwsArgumentError,
+      );
+      expect(
+        () => TriggerHsvValue(hue: 0, saturation: -0.1, value: 1),
+        throwsArgumentError,
+      );
+    });
   });
 
   group('MacroGraph JSON', () {
@@ -119,6 +134,39 @@ void main() {
       ).validate(_validGraph());
 
       expect(issues, isEmpty);
+    });
+
+    test('accepts an HSV output binding to color', () {
+      final graph = MacroGraph(
+        id: 'color-macro',
+        name: 'Color',
+        nodes: <MacroNode>[
+          _node(
+            id: 'color-source',
+            kind: 'test.colorSource',
+            ports: <MacroPortDeclaration>[
+              _output('hsv-out', MacroPortType.triggerHsv),
+            ],
+          ),
+        ],
+        edges: const <MacroEdge>[],
+        targetBindings: <MacroTargetBinding>[
+          MacroTargetBinding(
+            id: 'color-binding',
+            sourcePortId: 'hsv-out',
+            targetKind: MacroTargetKind.device,
+            targetId: 'device-1',
+            parameter: MacroTargetParameter.color,
+          ),
+        ],
+      );
+
+      expect(
+        const MacroGraphValidator(
+          knownNodeKinds: <String>{'test.colorSource'},
+        ).validate(graph),
+        isEmpty,
+      );
     });
 
     test('reports unavailable modules, type errors and invalid targets', () {

@@ -251,6 +251,7 @@ final class MacroGraphValidator {
   ) => switch (parameter) {
     MacroTargetParameter.brightness => type == MacroPortType.triggerLevel,
     MacroTargetParameter.power => type == MacroPortType.triggerGate,
+    MacroTargetParameter.color => type == MacroPortType.triggerHsv,
   };
 
   static bool _hasCycle(Map<String, Set<String>> adjacency) {

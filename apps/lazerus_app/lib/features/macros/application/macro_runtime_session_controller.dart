@@ -406,7 +406,9 @@ final class MacroRuntimeSessionController
 
   void _onRuntimeEvent(String macroId, TriggerEvent event) {
     final value = event.primaryValue;
-    if (value is TriggerGateValue || value is TriggerLevelValue) {
+    if (value is TriggerGateValue ||
+        value is TriggerLevelValue ||
+        value is TriggerHsvValue) {
       _onOutputValue(macroId, event.sourcePortId, value);
       return;
     }

@@ -201,7 +201,7 @@ final class MacroEdge {
 enum MacroTargetKind { device, group }
 
 /// A capability-neutral target parameter that can receive a trigger value.
-enum MacroTargetParameter { brightness, power }
+enum MacroTargetParameter { brightness, power, color }
 
 /// A graph output mapping to one saved device or group reference.
 final class MacroTargetBinding {

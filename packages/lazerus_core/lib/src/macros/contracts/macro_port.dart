@@ -11,6 +11,11 @@ enum MacroPortType {
 
   /// A normalized, continuous event value in the inclusive range 0..1.
   triggerLevel,
+
+  /// A HSV colour value. Hue is expressed in degrees and saturation/value are
+  /// normalized, allowing colour-producing modules to remain independent from
+  /// protocol-specific RGB, RGBW, or CCT encoders.
+  triggerHsv,
 }
 
 /// The direction of a port declared by a trigger or modifier module.

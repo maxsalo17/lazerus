@@ -48,6 +48,7 @@ enum MacroPortType {
   triggerArray,
   triggerGate,
   triggerLevel,
+  triggerHsv,
 }
 
 sealed class TriggerValue {}
@@ -75,20 +76,32 @@ class TriggerLevelValue extends TriggerValue {
   TriggerLevelValue(this.value);
   final double value; // inclusive 0..1
 }
+
+class TriggerHsvValue extends TriggerValue {
+  TriggerHsvValue({
+    required this.hue,        // inclusive 0..360 degrees
+    required this.saturation, // inclusive 0..1
+    required this.value,      // inclusive 0..1
+  });
+}
 ```
 
 `triggerMonoAudio` accepts only `TriggerMonoAudioValue`; sample rate is always
 present. `triggerArray` accepts the generic `TriggerArrayValue` and deliberately
-has no audio metadata. A `TriggerEvent` also contains source-port ID, monotonic
-timestamp, sequence number, a primary value and an optional secondary value.
-Display identifiers belong to port metadata, rather than being repeated for
-every emitted event.
+has no audio metadata. `triggerHsv` carries a protocol-neutral HSV value rather
+than an RGB/RGBW/CCT wire value. A `TriggerEvent` also contains source-port ID,
+monotonic timestamp, sequence number, a primary value and an optional secondary
+value. Display identifiers belong to port metadata, rather than being repeated
+for every emitted event.
 
-The graph also has typed `MacroTargetBinding` values. In the first slice, a
-level output maps its primary value to brightness for a current device or group
-reference. Future modifiers may map a secondary level to a colour domain, but
-they must declare that mapping explicitly; no generic RGB/RGBW/CCT conversion
-is implied.
+The graph retains typed `MacroTargetBinding` values as its transport-free
+runtime delivery contract. The patcher no longer exposes a separate binding
+form: an input-only device/group target node is placed on the graph, and each
+edge to one of its `Power`, `Brightness` or `Color` inputs derives the matching
+binding. Old saved bindings are migrated to target nodes when opened and saved.
+The bridge converts a `triggerHsv → Color` binding to the shared RGB desired
+state, then the existing device-calibration and protocol-command boundaries
+apply. No macro module knows a protocol frame format.
 
 ## Modular architecture
 
@@ -120,8 +133,8 @@ apps/lazerus_app/lib/core/macros/
   triggers/
     microphone/    # implemented platform PCM16 mono source
     multiband_eq/  # implemented pure typed mono-audio processor
-  modifiers/       # independently registered future modifiers (planned)
-  sinks/           # lighting-intent target expansion and mapping (planned)
+  modifiers/       # independently registered colour/transform modules
+  sinks/           # input-only plot targets and lighting-intent mapping
 
 apps/lazerus_app/lib/features/macros/
   application/     # Riverpod controllers
@@ -134,6 +147,31 @@ import a sibling trigger or modifier. The only permitted communication between
 modules is an event across a validated graph edge. Removing a module leaves its
 saved node and bindings detectable as unavailable/repairable; it must not
 silently rewrite or delete macro JSON.
+
+## Target nodes and initial colour modifiers
+
+The palette contains registered source, trigger/modifier and discovered-device
+entries. On desktop, an entry can be dragged onto the X/Y plot; a click adds it
+at the next available position. Device nodes expose input ports only, based on
+their currently declared capability profile. Therefore an unavailable colour,
+brightness or power capability cannot be wired as though it worked.
+
+`modifier.color` is a manual HSV source with a compact hue picker. It has no
+input and emits a `triggerHsv` value. `modifier.color_brightness_combine` takes
+one HSV input and one `triggerLevel` input; it replaces the HSV **Value**
+component with that level and emits a new `triggerHsv` output. Its level input
+is not a strip brightness command. Both outputs use ordinary graph edge
+fan-out, so one colour source or combined colour can drive multiple compatible
+inputs while any one input still permits only one source.
+
+Colour delivery is converted at the application bridge to `RgbColor`, then
+passes through existing per-device calibration and the selected protocol
+adapter. This gives Lotus Lamp X the same macro colour route as ordinary colour
+commands without coupling its package to macro contracts. A black HSV Value is
+encoded as a black RGB frame, which has been reported to fully turn off the
+locally tested strips; it is not substituted with the Lotus brightness command.
+Device-specific limits and real strip response still require further hardware
+validation.
 
 ## Graph and runtime rules
 
@@ -291,20 +329,30 @@ macro IDs; absent files remain visible as missing, repairable references and
 are never deleted as a side effect of loading or selecting a Scene.
 
 `MacroEditorPage` creates an editable `Microphone → Multiband EQ` starter
-graph. Its desktop X/Y patcher supports output-to-input drag connections and
-cable removal; touch has the equivalent output-tap then input-tap workflow.
-Node positions, edges, bands and bindings are saved only after an explicit
-Save. While a macro is running the editor is read-only, so the runtime cannot
-silently diverge from an unsaved graph.
+graph. Its desktop X/Y patcher uses a click-to-patch flow: click any port to
+start a cable, move the pointer without holding a button, then click another
+port to validate and connect it. A click on an incompatible port or empty plot
+cancels the pending cable. Clicking a connected port detaches its cable and
+continues from the opposite endpoint, ready to be re-patched. When a port has
+more than one cable, its context menu lists the connected node and input/output
+indices so the intended cable is selected before detaching. Node titles also
+include their plot index for this disambiguation. Touch has the equivalent
+tap-to-start then tap-to-finish workflow.
+Node positions, edges, bands, source settings and target-node-derived bindings
+are saved with **Save**. Pressing **Start** also first saves the current editor
+draft, then builds the runtime from that persisted version; this ensures a
+visible source setting such as a Color modifier hue is the value the runtime
+emits. While a macro is running the editor is read-only, so its graph cannot
+silently diverge from the active runtime.
 
 The EQ inspector exposes stable bands, gate/level mode and relevant threshold
 or normalization values. It receives only an in-memory, derived spectrum view
 from the running macro; PCM bytes are immediately discarded and are never
-written to JSON, logs or diagnostic export. Binding selection is limited to
-typed gate→power and level→brightness mappings for currently listed groups or
-devices. A saved target can later disappear; the editor marks that binding for
-repair and the delivery bridge rechecks live target, connection and capability
-at send time.
+written to JSON, logs or diagnostic export. Dragging a module output to a
+device input is the only way to create a target route: gate→power,
+level→brightness and HSV→colour. A saved target can later disappear; its node
+remains repairable and the delivery bridge rechecks live target, connection and
+capability at send time.
 
 The runtime panel presents validation issues and the latest delivery outcome.
 It distinguishes `transmitted` from controller confirmation and preserves the
@@ -314,11 +362,11 @@ an iOS background guarantee. While the editor is open, microphone
 permission/capture status is shown without retaining its PCM data.
 
 While running, each connected scalar output cable shows the latest `ON`/`OFF`
-gate state or normalized `0..1` level above the cable. These are transient UI
-values only; audio frames and output histories are neither persisted nor
-exported. The IDE console also records each scalar binding lifecycle under
-`Lazerus.MacroLightingDeliveryBridge` (macro, binding, target, parameter,
-value and transport outcome), without logging microphone PCM.
+gate state, normalized `0..1` level or HSV hue above the cable. These are
+transient UI values only; audio frames and output histories are neither
+persisted nor exported. The IDE console also records each scalar/HSV binding
+lifecycle under `Lazerus.MacroLightingDeliveryBridge` (macro, binding, target,
+parameter, value and transport outcome), without logging microphone PCM.
 
 ## Verification
 

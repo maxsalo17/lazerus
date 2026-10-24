@@ -70,6 +70,41 @@ final class TriggerLevelValue extends TriggerValue {
   MacroPortType get portType => MacroPortType.triggerLevel;
 }
 
+/// A protocol-neutral HSV colour value carried by [MacroPortType.triggerHsv].
+///
+/// [hue] is in the inclusive 0..360 degree domain. [saturation] and [value]
+/// use the inclusive normalized domain. Keeping HSV in the macro contract
+/// lets a graph combine a colour source with a reactive level without making
+/// the graph depend on any lighting-controller wire encoding.
+final class TriggerHsvValue extends TriggerValue {
+  TriggerHsvValue({
+    required this.hue,
+    required this.saturation,
+    required this.value,
+  }) {
+    if (!hue.isFinite || hue < 0 || hue > 360) {
+      throw ArgumentError.value(hue, 'hue', 'Must be in the range 0..360.');
+    }
+    if (!saturation.isFinite || saturation < 0 || saturation > 1) {
+      throw ArgumentError.value(
+        saturation,
+        'saturation',
+        'Must be in the range 0..1.',
+      );
+    }
+    if (!value.isFinite || value < 0 || value > 1) {
+      throw ArgumentError.value(value, 'value', 'Must be in the range 0..1.');
+    }
+  }
+
+  final double hue;
+  final double saturation;
+  final double value;
+
+  @override
+  MacroPortType get portType => MacroPortType.triggerHsv;
+}
+
 /// Transient data emitted by a running trigger or modifier.
 ///
 /// Events are never part of persisted macro JSON. [timestamp] is expressed on

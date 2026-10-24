@@ -72,10 +72,11 @@ JSON values; transient trigger events, microphone buffers, device state and BLE
 identifiers are not persisted.
 
 The initial port vocabulary is `triggerMonoAudio`, `triggerArray`,
-`triggerGate` and `triggerLevel`. `TriggerMonoAudioValue` always has a positive
-`sampleRateHz`; generic `TriggerArrayValue` deliberately has no audio metadata.
-Pure validation rejects incompatible connections, missing ports, unavailable
-node kinds, invalid bindings and unrestricted cycles.
+`triggerGate`, `triggerLevel` and `triggerHsv`. `TriggerMonoAudioValue` always
+has a positive `sampleRateHz`; generic `TriggerArrayValue` deliberately has no
+audio metadata; `TriggerHsvValue` validates hue `0..360` and saturation/value
+`0..1`. Pure validation rejects incompatible connections, missing ports,
+unavailable node kinds, invalid bindings and unrestricted cycles.
 
 Each macro is an independently stored, URI-encoded `*.json` file behind
 `MacroFileStorage`. A malformed individual document does not erase any Scene
@@ -89,7 +90,10 @@ boundaries and editor/runtime behavior.
 
 `MacroLightingIntent` and delivery-status records are runtime-only values. A
 macro runtime publishes these typed intents through the app delivery boundary;
-it never persists transient events or writes directly to a transport.
+it never persists transient events or writes directly to a transport. An
+input-only `sink.lighting_target` node persists the selected target kind/ID and
+capability-neutral input parameters; its incoming graph edges derive the saved
+`MacroTargetBinding` records used by the runtime.
 
 The initial Multiband EQ stores only an ordered `bands` configuration in its
 macro node parameters: stable band ID, frequency range, gate/level mode,

@@ -141,8 +141,12 @@ The modular Scene Macro workflow is implemented: typed graph contracts,
 validation, application-support JSON persistence, a transport-free
 runtime/registry and bounded in-flight-first lighting-intent delivery. Scenes can
 select saved macros; the Macros page provides a patcher editor with
-`Microphone → Multiband EQ`, band configuration, target bindings and runtime
-diagnostics. It does not claim microphone/strip hardware validation. See
+`Microphone → Multiband EQ`, modular colour sources/modifiers, a drag palette
+and input-only device nodes. Connecting an output to a device input is the
+binding: gate→power, level→brightness and HSV→colour. HSV is converted through
+the normal calibrated RGB command path, so Lotus Lamp X does not need a
+macro-specific wire protocol. It does not claim microphone/strip hardware
+validation. See
 [`docs/SCENE_MACROS.md`](docs/SCENE_MACROS.md).
 
 The current Flutter app also has a local, in-memory **Logs** screen for BLE
