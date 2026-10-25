@@ -102,6 +102,21 @@ module. The only inter-module communication is a typed event over a validated
 edge. Removing an installed module leaves any saved node detectable and
 repairable; it does not silently mutate saved JSON.
 
+## Portable Macro templates
+
+A Macro can be transferred as a versioned JSON template. Export replaces every
+`sink.lighting_target` application-device ID and user-visible device name with
+a template-local placeholder, while retaining the node ports, edges, editor
+positions and reset policy. The template contains no BLE or installation-local
+device identity.
+
+Import validates the independent template schema and saves a Macro with a new
+local ID. Its placeholders are visibly unresolved on the patcher canvas and
+are skipped at runtime. Selecting a placeholder opens a capability-filtered
+device chooser; the selection updates only that target node and preserves its
+node and port IDs so the existing graph wiring remains intact. Other mapped
+targets continue to run while a placeholder remains unresolved.
+
 The Flutter editor follows the same boundary. It knows graph editing,
 connection validation, persistence and runtime replacement, but not concrete
 node types. A `MacroEditorNodeModule` owns one node family's palette entry,

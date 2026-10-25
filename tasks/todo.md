@@ -79,3 +79,26 @@
     drag-to-connect tests; `flutter analyze`, `flutter test`, and macOS build.
   - Files: Scene macro pages/controllers, patcher canvas/widgets and
     diagnostics UI.
+
+## Portable Macro templates
+
+- [x] Task 1: Versioned template contract and pure device sanitisation
+  - Acceptance: export removes every application device ID and user name,
+    creates one placeholder for each target node, and import validates JSON
+    before producing a fresh Macro ID.
+  - Verify: template codec/transformer unit tests.
+  - Files: `core/macros/templates/*`, focused tests, `docs/MACRO_TEMPLATES.md`.
+
+- [x] Task 2: Template import/export boundary and Macro-library actions
+  - Acceptance: a user can export a saved Macro and import a valid template as
+    a new saved Macro; invalid files report errors without mutating the library.
+  - Verify: controller/repository tests and widget tests.
+  - Files: Macro application/persistence boundary, library page, focused tests.
+
+- [x] Task 3: Placeholder repair on the patcher canvas
+  - Acceptance: clicking an imported placeholder exposes an explicit device
+    chooser; only compatible capability-known devices can be selected; mapping
+    retains node ports, wires and positions and then re-derives bindings.
+  - Verify: target-module and editor widget tests; `flutter analyze`; `flutter
+    test`.
+  - Files: lighting-target module, Macro editor, focused tests and docs.

@@ -31,3 +31,15 @@
    emits one gate or level output per configured band.
 4. Add saved-macro selection to Scene, target parameter bindings, and a
    patcher-style graph editor with Spectrum/EQ configuration and diagnostics.
+
+## Plan: portable Macro templates
+
+1. Define an independent, versioned template JSON contract and pure graph
+   transformer that removes every source-device reference and creates stable
+   per-target placeholders.
+2. Add validated import/export orchestration at the Macro-library boundary,
+   using the approved system file or clipboard interaction mechanism.
+3. Extend the lighting-target editor module to render unresolved placeholders
+   and explicitly replace one with a capability-compatible discovered device.
+4. Cover contract, import error, mapping and widget flows; document format and
+   run Flutter checks.

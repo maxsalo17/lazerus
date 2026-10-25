@@ -83,6 +83,15 @@ read; a subsequent explicit save writes the device-only model. A legacy target
 that cannot resolve to a current device stays visible as an unresolved target
 and never emits a command.
 
+`MacroTemplate` is a separate import/export document, not a replacement for a
+saved `MacroGraph`. Its versioned JSON contains a sanitised graph and one
+template-local placeholder for every lighting-target node. Source application
+device IDs, BLE identifiers, and user-defined device names are removed during
+export. Import assigns a fresh Macro ID and preserves unresolved placeholders
+until the user explicitly maps each to a capability-compatible local device.
+Runtime execution omits only bindings that target those placeholders, leaving
+other mapped devices active.
+
 ## EQ node parameters
 
 The multiband EQ persists only an ordered band configuration: stable band ID,

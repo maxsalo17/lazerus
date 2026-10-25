@@ -6,6 +6,7 @@ import 'package:lazerus_core/lazerus_core.dart';
 
 import '../../../core/macros/registry/macro_module_registry.dart';
 import '../../../core/macros/runtime/macro_lighting_delivery_bridge.dart';
+import '../../../core/macros/templates/macro_template_transformer.dart';
 import '../../debug/application/debug_devices_controller.dart';
 import 'macro_library_controller.dart';
 
@@ -235,6 +236,7 @@ final class MacroRuntimeSessionController
     extends Notifier<MacroRuntimeSessionsState> {
   static const _maxRecentEvents = 100;
   static const _visualTelemetryInterval = Duration(milliseconds: 50);
+  static const _templateTransformer = MacroTemplateTransformer();
 
   late final MacroModuleRegistry _registry;
   late final MacroLightingDeliveryBridge Function() _newBridge;
@@ -339,39 +341,21 @@ final class MacroRuntimeSessionController
       return false;
     }
     final previousSession = _active[macroId];
-    final runtime = MacroRuntime(graph: definition, registry: _registry);
+    final executionDefinition = _templateTransformer.executionGraph(definition);
+    final runtime = MacroRuntime(
+      graph: executionDefinition,
+      registry: _registry,
+    );
     final issues = runtime.validate();
     if (issues.isNotEmpty) {
       await runtime.dispose();
-      if (!_isCurrentRunGeneration(macroId, expectedRunGeneration)) {
-        return false;
-      }
-      final current = state.sessions[macroId];
-      if (preserveRunningOnFailure &&
-          previousSession != null &&
-          current != null) {
-        _updateStatus(
-          current.copyWith(
-            validationIssues: issues,
-            detail: 'Live changes must be repaired before they can apply.',
-          ),
-        );
-      } else {
-        final status = MacroRuntimeSessionStatus(
-          macroId: macroId,
-          lifecycle: MacroRuntimeSessionLifecycle.invalid,
-          validationIssues: issues,
-          detail: 'The macro graph must be repaired before it can run.',
-        );
-        _setStatus(status);
-      }
-      _emit(
-        MacroRuntimeSessionEvent.validation(
-          macroId: macroId,
-          validationIssues: issues,
-        ),
+      return _reportValidationFailure(
+        macroId: macroId,
+        issues: issues,
+        previousSession: previousSession,
+        preserveRunningOnFailure: preserveRunningOnFailure,
+        expectedRunGeneration: expectedRunGeneration,
       );
-      return false;
     }
 
     final bridge = _newBridge();
@@ -411,7 +395,7 @@ final class MacroRuntimeSessionController
     if (previousSession != null) {
       bridge.inheritRestorationStateFrom(previousSession.bridge);
     }
-    bridge.captureStatesBeforeMacroWrites(definition.targetBindings);
+    bridge.captureStatesBeforeMacroWrites(executionDefinition.targetBindings);
     if (!_isCurrentRunGeneration(macroId, expectedRunGeneration)) {
       await candidate.dispose();
       return false;
@@ -460,6 +444,44 @@ final class MacroRuntimeSessionController
       );
       return false;
     }
+  }
+
+  Future<bool> _reportValidationFailure({
+    required String macroId,
+    required List<MacroGraphValidationIssue> issues,
+    required _ActiveMacroRuntimeSession? previousSession,
+    required bool preserveRunningOnFailure,
+    required int expectedRunGeneration,
+  }) async {
+    if (!_isCurrentRunGeneration(macroId, expectedRunGeneration)) {
+      return false;
+    }
+    final current = state.sessions[macroId];
+    if (preserveRunningOnFailure &&
+        previousSession != null &&
+        current != null) {
+      _updateStatus(
+        current.copyWith(
+          validationIssues: issues,
+          detail: 'Live changes must be repaired before they can apply.',
+        ),
+      );
+    } else {
+      final status = MacroRuntimeSessionStatus(
+        macroId: macroId,
+        lifecycle: MacroRuntimeSessionLifecycle.invalid,
+        validationIssues: issues,
+        detail: 'The macro graph must be repaired before it can run.',
+      );
+      _setStatus(status);
+    }
+    _emit(
+      MacroRuntimeSessionEvent.validation(
+        macroId: macroId,
+        validationIssues: issues,
+      ),
+    );
+    return false;
   }
 
   void _reportLaunchFailure({

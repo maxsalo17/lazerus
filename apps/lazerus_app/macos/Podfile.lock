@@ -2,6 +2,8 @@ PODS:
   - bluetooth_low_energy_darwin (0.0.1):
     - Flutter
     - FlutterMacOS
+  - file_selector_macos (0.0.1):
+    - FlutterMacOS
   - FlutterMacOS (1.0.0)
   - record_macos (1.2.1):
     - FlutterMacOS
@@ -11,6 +13,7 @@ PODS:
 
 DEPENDENCIES:
   - bluetooth_low_energy_darwin (from `Flutter/ephemeral/.symlinks/plugins/bluetooth_low_energy_darwin/darwin`)
+  - file_selector_macos (from `Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - record_macos (from `Flutter/ephemeral/.symlinks/plugins/record_macos/macos`)
   - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
@@ -18,6 +21,8 @@ DEPENDENCIES:
 EXTERNAL SOURCES:
   bluetooth_low_energy_darwin:
     :path: Flutter/ephemeral/.symlinks/plugins/bluetooth_low_energy_darwin/darwin
+  file_selector_macos:
+    :path: Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos
   FlutterMacOS:
     :path: Flutter/ephemeral
   record_macos:
@@ -27,6 +32,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   bluetooth_low_energy_darwin: 8027d98a11f64f880e4c738157dfe5ca88d28dbc
+  file_selector_macos: 9e9e068e90ebee155097d00e89ae91edb2374db7
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   record_macos: 5d55909f9650314be6424ffd6b123ac75a08c3c1
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb

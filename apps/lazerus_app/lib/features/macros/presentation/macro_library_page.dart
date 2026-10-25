@@ -6,6 +6,7 @@ import 'package:lazerus_core/lazerus_core.dart';
 
 import '../application/macro_library_controller.dart';
 import '../application/macro_runtime_session_controller.dart';
+import '../application/macro_template_transfer_controller.dart';
 import 'macro_editor_page.dart';
 
 /// Library of locally saved Macro graph definitions.
@@ -15,10 +16,26 @@ class MacroLibraryPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final library = ref.watch(macroLibraryProvider);
+    final transfer = ref.watch(macroTemplateTransferProvider);
+    final files = ref.watch(macroTemplateFileGatewayProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Macros'),
         actions: <Widget>[
+          IconButton(
+            key: const Key('import-macro-template'),
+            tooltip: 'Імпортувати Macro template',
+            onPressed: library.isLoading || transfer.isBusy
+                ? null
+                : () => unawaited(_importTemplate(context, ref)),
+            icon: transfer.isImporting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.file_download_outlined),
+          ),
           IconButton(
             key: const Key('reload-macro-library'),
             tooltip: 'Оновити бібліотеку',
@@ -49,6 +66,8 @@ class MacroLibraryPage extends ConsumerWidget {
                 const SizedBox(height: 16),
                 if (library.error case final error? when error.isNotEmpty)
                   _MacroLibraryError(message: error),
+                if (transfer.error case final error? when error.isNotEmpty)
+                  _MacroLibraryError(message: error),
                 if (library.macros.isEmpty)
                   const _EmptyMacroLibrary()
                 else
@@ -59,6 +78,11 @@ class MacroLibraryPage extends ConsumerWidget {
                         macro: macro,
                         onOpen: () => _openEditor(context, macro: macro),
                         onDelete: () => _deleteMacro(context, ref, macro),
+                        onExport: transfer.isBusy || !files.supportsSaveAs
+                            ? null
+                            : () => unawaited(
+                                _exportTemplate(context, ref, macro),
+                              ),
                       ),
                     ),
                   ),
@@ -100,6 +124,34 @@ class MacroLibraryPage extends ConsumerWidget {
     await ref.read(macroRuntimeSessionsProvider.notifier).stop(macro.id);
     await ref.read(macroLibraryProvider.notifier).delete(macro.id);
   }
+
+  Future<void> _importTemplate(BuildContext context, WidgetRef ref) async {
+    final result = await ref
+        .read(macroTemplateTransferProvider.notifier)
+        .importMacro();
+    if (!context.mounted) return;
+    final macro = result.macro;
+    if (result.outcome == MacroTemplateTransferOutcome.completed &&
+        macro != null) {
+      await _openEditor(context, macro: macro);
+    }
+  }
+
+  Future<void> _exportTemplate(
+    BuildContext context,
+    WidgetRef ref,
+    MacroGraph macro,
+  ) async {
+    final outcome = await ref
+        .read(macroTemplateTransferProvider.notifier)
+        .exportMacro(macro);
+    if (!context.mounted || outcome != MacroTemplateTransferOutcome.completed) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Macro template збережено.')));
+  }
 }
 
 class _MacroTile extends ConsumerWidget {
@@ -107,11 +159,13 @@ class _MacroTile extends ConsumerWidget {
     required this.macro,
     required this.onOpen,
     required this.onDelete,
+    required this.onExport,
   });
 
   final MacroGraph macro;
   final VoidCallback onOpen;
   final VoidCallback onDelete;
+  final VoidCallback? onExport;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -133,6 +187,12 @@ class _MacroTile extends ConsumerWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            IconButton(
+              key: Key('export-macro-${macro.id}'),
+              tooltip: 'Експортувати Macro template',
+              onPressed: onExport,
+              icon: const Icon(Icons.file_upload_outlined),
+            ),
             IconButton(
               key: Key('delete-macro-${macro.id}'),
               tooltip: 'Видалити macro',

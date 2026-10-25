@@ -42,6 +42,14 @@ hardware confirmation.
 The app has no structured device database, relinking UI, reconnect policy,
 central scheduler, scenes, or pipelines yet.
 
+Saved Macros can be exported as portable JSON templates from the Macro library.
+Export replaces every target device with an explicit placeholder and opens the
+native macOS Save As dialog. Import uses the system file picker, creates a new
+local Macro, and opens its patcher canvas. Each placeholder must be assigned to
+a capability-compatible discovered device before that target receives commands;
+unmapped placeholders are skipped while the rest of the Macro runs. No device
+or BLE identifier is carried between installations.
+
 ## Logs and diagnostic reads
 
 The **Logs** tab keeps up to 400 local, in-memory BLE diagnostic events. It
