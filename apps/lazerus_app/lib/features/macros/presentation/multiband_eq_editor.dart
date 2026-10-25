@@ -1,42 +1,53 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:lazerus_core/lazerus_core.dart';
 
 import '../../../core/macros/triggers/multiband_eq/multiband_eq_trigger.dart';
+import 'node_modules/multiband_eq/multiband_eq_spectrum_analyzer.dart';
 
-typedef MultibandEqConfigurationChanged =
-    void Function(MultibandEqTriggerConfiguration configuration);
+typedef MultibandEqConfigurationChanged = void Function(MultibandEqTriggerConfiguration configuration);
 
 /// Edits a serializable EQ-band configuration without owning persistence or
-/// audio capture. [spectrumValues] is an optional current, normalized display
-/// snapshot; it is never included in the emitted configuration.
+/// audio capture. It accepts only raw events from the source ports connected
+/// to this EQ node, then coalesces visual frames through a Flutter [Ticker].
 class MultibandEqEditor extends StatefulWidget {
-  const MultibandEqEditor({
+  MultibandEqEditor({
     super.key,
     required this.configuration,
     required this.onChanged,
-    this.spectrumValues = const <double>[],
-    this.spectrumFrequenciesHz = const <double>[],
+    required Iterable<String> audioSourcePortIds,
+    this.runtimeFrames,
     this.enabled = true,
-  });
+  }) : audioSourcePortIds = Set<String>.unmodifiable(audioSourcePortIds);
 
   final MultibandEqTriggerConfiguration configuration;
   final MultibandEqConfigurationChanged onChanged;
-  final List<double> spectrumValues;
-  final List<double> spectrumFrequenciesHz;
+  final Set<String> audioSourcePortIds;
+  final Stream<Object>? runtimeFrames;
   final bool enabled;
 
   @override
   State<MultibandEqEditor> createState() => _MultibandEqEditorState();
 }
 
-class _MultibandEqEditorState extends State<MultibandEqEditor> {
+class _MultibandEqEditorState extends State<MultibandEqEditor> with SingleTickerProviderStateMixin {
   late List<MultibandEqBandDefinition> _bands;
+  late final Ticker _spectrumTicker;
+  static const _spectrumAnalyzer = MultibandEqSpectrumAnalyzer();
+  StreamSubscription<Object>? _spectrumSubscription;
+  MultibandEqSpectrum? _pendingSpectrum;
+  MultibandEqSpectrum? _displayedSpectrum;
+  var _hasPendingSpectrum = false;
 
   @override
   void initState() {
     super.initState();
     _bands = List<MultibandEqBandDefinition>.of(widget.configuration.bands);
+    _spectrumTicker = createTicker(_onSpectrumTick);
+    _bindRuntimeFrames(widget.runtimeFrames);
   }
 
   @override
@@ -45,76 +56,118 @@ class _MultibandEqEditorState extends State<MultibandEqEditor> {
     if (oldWidget.configuration != widget.configuration) {
       _bands = List<MultibandEqBandDefinition>.of(widget.configuration.bands);
     }
+    if (oldWidget.runtimeFrames != widget.runtimeFrames) {
+      _bindRuntimeFrames(widget.runtimeFrames);
+    }
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: <Widget>[
-      Text('Multiband EQ', style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 8),
-      Semantics(
-        label: 'Current audio spectrum display',
-        child: SizedBox(
-          height: 174,
-          width: double.infinity,
-          child: RepaintBoundary(
-            child: CustomPaint(
-              painter: _SpectrumPainter(
-                values: widget.spectrumValues,
-                frequenciesHz: widget.spectrumFrequenciesHz,
-                bands: _bands,
+  void dispose() {
+    unawaited(_spectrumSubscription?.cancel());
+    _spectrumTicker.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final spectrum = _displayedSpectrum;
+    final spectrumValues = spectrum?.levels ?? const <double>[];
+    final spectrumFrequenciesHz = spectrum?.frequenciesHz ?? const <double>[];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('Multiband EQ', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Semantics(
+          label: 'Current audio spectrum display',
+          child: SizedBox(
+            height: 174,
+            width: double.infinity,
+            child: RepaintBoundary(
+              child: CustomPaint(
+                painter: _SpectrumPainter(values: spectrumValues, frequenciesHz: spectrumFrequenciesHz, bands: _bands),
               ),
             ),
           ),
         ),
-      ),
-      const SizedBox(height: 8),
-      Text(
-        'Live analyzer · dBFS scale · bands, modes and thresholds are shown over the spectrum. Display values are transient and are not saved.',
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8,
-        runSpacing: 6,
-        children: _bands.indexed
-            .map(
-              (entry) => _SpectrumBandLegend(
-                band: entry.$2,
-                color: _spectrumBandColor(entry.$1),
-              ),
-            )
-            .toList(growable: false),
-      ),
-      const SizedBox(height: 12),
-      ..._bands.indexed.map(
-        (entry) => _BandCard(
-          key: ValueKey<String>('eq-band-${entry.$2.id}'),
-          band: entry.$2,
-          enabled: widget.enabled,
-          onChanged: (band) => _replaceBand(entry.$1, band),
-          onRemove: _bands.length > 1 ? () => _removeBand(entry.$1) : null,
+        const SizedBox(height: 8),
+        Text(
+          'Live analyzer · dBFS scale · bands, modes and thresholds are shown over the spectrum. Display values are transient and are not saved.',
+          style: Theme.of(context).textTheme.bodySmall,
         ),
-      ),
-      const SizedBox(height: 8),
-      OutlinedButton.icon(
-        key: const Key('add-eq-band'),
-        onPressed: widget.enabled ? _addBand : null,
-        icon: const Icon(Icons.add),
-        label: const Text('Add frequency band'),
-      ),
-    ],
-  );
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: _bands.indexed
+              .map((entry) => _SpectrumBandLegend(band: entry.$2, color: _spectrumBandColor(entry.$1)))
+              .toList(growable: false),
+        ),
+        const SizedBox(height: 12),
+        ..._bands.indexed.map(
+          (entry) => _BandCard(
+            key: ValueKey<String>('eq-band-${entry.$2.id}'),
+            band: entry.$2,
+            enabled: widget.enabled,
+            onChanged: (band) => _replaceBand(entry.$1, band),
+            onRemove: _bands.length > 1 ? () => _removeBand(entry.$1) : null,
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('add-eq-band'),
+          onPressed: widget.enabled ? _addBand : null,
+          icon: const Icon(Icons.add),
+          label: const Text('Add frequency band'),
+        ),
+      ],
+    );
+  }
+
+  void _bindRuntimeFrames(Stream<Object>? runtimeFrames) {
+    unawaited(_spectrumSubscription?.cancel());
+    _spectrumTicker.stop();
+    _pendingSpectrum = null;
+    _displayedSpectrum = null;
+    _hasPendingSpectrum = false;
+    _spectrumSubscription = runtimeFrames?.listen(_onRuntimeFrame);
+  }
+
+  void _onRuntimeFrame(Object frame) {
+    if (frame is! TriggerEvent ||
+        !widget.audioSourcePortIds.contains(frame.sourcePortId) ||
+        frame.primaryValue is! TriggerMonoAudioValue) {
+      return;
+    }
+    final spectrum = _spectrumAnalyzer.analyze(frame.primaryValue as TriggerMonoAudioValue);
+    _pendingSpectrum = spectrum;
+    _hasPendingSpectrum = true;
+    if (!_spectrumTicker.isActive) {
+      _spectrumTicker.start();
+    }
+  }
+
+  void _onSpectrumTick(Duration _) {
+    if (!_hasPendingSpectrum || !mounted) {
+      _spectrumTicker.stop();
+      return;
+    }
+    final nextSpectrum = _pendingSpectrum;
+    _hasPendingSpectrum = false;
+    if (nextSpectrum != null) {
+      setState(() => _displayedSpectrum = nextSpectrum);
+    }
+    if (!_hasPendingSpectrum) {
+      _spectrumTicker.stop();
+    }
+  }
 
   void _replaceBand(int index, MultibandEqBandDefinition band) {
-    final candidate = List<MultibandEqBandDefinition>.of(_bands)
-      ..[index] = band;
+    final candidate = List<MultibandEqBandDefinition>.of(_bands)..[index] = band;
     _commit(candidate);
   }
 
-  void _removeBand(int index) =>
-      _commit(List<MultibandEqBandDefinition>.of(_bands)..removeAt(index));
+  void _removeBand(int index) => _commit(List<MultibandEqBandDefinition>.of(_bands)..removeAt(index));
   void _addBand() {
     final last = _bands.last;
     final lower = last.upperFrequencyHz;
@@ -142,10 +195,7 @@ class _MultibandEqEditorState extends State<MultibandEqEditor> {
 
   void _commit(List<MultibandEqBandDefinition> bands) {
     try {
-      final configuration = MultibandEqTriggerConfiguration(
-        bands: bands,
-        outputInterval: widget.configuration.outputInterval,
-      );
+      final configuration = MultibandEqTriggerConfiguration(bands: bands, outputInterval: widget.configuration.outputInterval);
       setState(() => _bands = bands);
       widget.onChanged(configuration);
     } on ArgumentError {
@@ -156,13 +206,7 @@ class _MultibandEqEditorState extends State<MultibandEqEditor> {
 }
 
 class _BandCard extends StatelessWidget {
-  const _BandCard({
-    super.key,
-    required this.band,
-    required this.enabled,
-    required this.onChanged,
-    this.onRemove,
-  });
+  const _BandCard({super.key, required this.band, required this.enabled, required this.onChanged, this.onRemove});
   final MultibandEqBandDefinition band;
   final bool enabled;
   final ValueChanged<MultibandEqBandDefinition> onChanged;
@@ -176,12 +220,7 @@ class _BandCard extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Expanded(
-                child: Text(
-                  band.id,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-              ),
+              Expanded(child: Text(band.id, style: Theme.of(context).textTheme.titleSmall)),
               IconButton(
                 key: Key('remove-eq-band-${band.id}'),
                 tooltip: 'Remove band',
@@ -216,19 +255,12 @@ class _BandCard extends StatelessWidget {
             key: Key('eq-band-mode-${band.id}'),
             initialValue: band.mode,
             isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Output mode',
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: 'Output mode', border: OutlineInputBorder()),
             items: MultibandEqBandMode.values
                 .map(
                   (mode) => DropdownMenuItem(
                     value: mode,
-                    child: Text(
-                      mode == MultibandEqBandMode.gate
-                          ? 'Gate (on/off)'
-                          : 'Level (normalized)',
-                    ),
+                    child: Text(mode == MultibandEqBandMode.gate ? 'Gate (on/off)' : 'Level (normalized)'),
                   ),
                 )
                 .toList(growable: false),
@@ -276,8 +308,7 @@ class _BandCard extends StatelessWidget {
             label: 'Peak buffer (ms; 0 = immediate)',
             value: band.outputBuffer.inMilliseconds.toDouble(),
             enabled: enabled,
-            onSubmitted: (value) =>
-                _update(outputBufferMilliseconds: value.round()),
+            onSubmitted: (value) => _update(outputBufferMilliseconds: value.round()),
           ),
         ],
       ),
@@ -334,24 +365,13 @@ class _BandCard extends StatelessWidget {
           lowerFrequencyHz: nextLower,
           upperFrequencyHz: nextUpper,
           mode: band.mode,
-          gateThreshold: band.mode == MultibandEqBandMode.gate
-              ? (gateThreshold ?? band.gateThreshold)
-              : null,
-          gateHysteresis: band.mode == MultibandEqBandMode.gate
-              ? (hysteresis ?? band.gateHysteresis)
-              : 0,
-          normalizationMinimum: band.mode == MultibandEqBandMode.level
-              ? (minimum ?? band.normalizationMinimum)
-              : null,
-          normalizationMaximum: band.mode == MultibandEqBandMode.level
-              ? (maximum ?? band.normalizationMaximum)
-              : null,
+          gateThreshold: band.mode == MultibandEqBandMode.gate ? (gateThreshold ?? band.gateThreshold) : null,
+          gateHysteresis: band.mode == MultibandEqBandMode.gate ? (hysteresis ?? band.gateHysteresis) : 0,
+          normalizationMinimum: band.mode == MultibandEqBandMode.level ? (minimum ?? band.normalizationMinimum) : null,
+          normalizationMaximum: band.mode == MultibandEqBandMode.level ? (maximum ?? band.normalizationMaximum) : null,
           attack: band.attack,
           release: band.release,
-          outputBuffer: Duration(
-            milliseconds:
-                outputBufferMilliseconds ?? band.outputBuffer.inMilliseconds,
-          ),
+          outputBuffer: Duration(milliseconds: outputBufferMilliseconds ?? band.outputBuffer.inMilliseconds),
         ),
       );
     } on ArgumentError {
@@ -361,12 +381,7 @@ class _BandCard extends StatelessWidget {
 }
 
 class _NumberField extends StatelessWidget {
-  const _NumberField({
-    required this.label,
-    required this.value,
-    required this.enabled,
-    required this.onSubmitted,
-  });
+  const _NumberField({required this.label, required this.value, required this.enabled, required this.onSubmitted});
   final String label;
   final double value;
   final bool enabled;
@@ -377,12 +392,8 @@ class _NumberField extends StatelessWidget {
     initialValue: value.toStringAsFixed(value == value.roundToDouble() ? 0 : 2),
     enabled: enabled,
     keyboardType: const TextInputType.numberWithOptions(decimal: true),
-    decoration: InputDecoration(
-      labelText: label,
-      border: const OutlineInputBorder(),
-    ),
-    validator: (text) =>
-        double.tryParse(text ?? '') == null ? 'Enter a number' : null,
+    decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+    validator: (text) => double.tryParse(text ?? '') == null ? 'Enter a number' : null,
     onFieldSubmitted: _submit,
     onChanged: _submit,
   );
@@ -401,14 +412,11 @@ class _SpectrumBandLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final details = switch (band.mode) {
-      MultibandEqBandMode.gate =>
-        'Gate ≥ ${band.gateThreshold!.toStringAsFixed(1)} dBFS',
+      MultibandEqBandMode.gate => 'Gate ≥ ${band.gateThreshold!.toStringAsFixed(1)} dBFS',
       MultibandEqBandMode.level =>
         'Level ${band.normalizationMinimum!.toStringAsFixed(1)}–${band.normalizationMaximum!.toStringAsFixed(1)} dBFS',
     };
-    final buffer = band.outputBuffer == Duration.zero
-        ? 'immediate'
-        : 'peak/${band.outputBuffer.inMilliseconds} ms';
+    final buffer = band.outputBuffer == Duration.zero ? 'immediate' : 'peak/${band.outputBuffer.inMilliseconds} ms';
     return Chip(
       visualDensity: VisualDensity.compact,
       avatar: CircleAvatar(backgroundColor: color, radius: 5),
@@ -418,22 +426,12 @@ class _SpectrumBandLegend extends StatelessWidget {
 }
 
 Color _spectrumBandColor(int index) {
-  const colors = <Color>[
-    Color(0xFF89B4FA),
-    Color(0xFFA6E3A1),
-    Color(0xFFF9E2AF),
-    Color(0xFFFAB387),
-    Color(0xFFCBA6F7),
-  ];
+  const colors = <Color>[Color(0xFF89B4FA), Color(0xFFA6E3A1), Color(0xFFF9E2AF), Color(0xFFFAB387), Color(0xFFCBA6F7)];
   return colors[index % colors.length];
 }
 
 class _SpectrumPainter extends CustomPainter {
-  const _SpectrumPainter({
-    required this.values,
-    required this.frequenciesHz,
-    required this.bands,
-  });
+  const _SpectrumPainter({required this.values, required this.frequenciesHz, required this.bands});
 
   final List<double> values;
   final List<double> frequenciesHz;
@@ -445,57 +443,30 @@ class _SpectrumPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     const leftAxis = 32.0;
     const bottomAxis = 18.0;
-    final graph = Rect.fromLTWH(
-      leftAxis,
-      0,
-      math.max(1, size.width - leftAxis),
-      math.max(1, size.height - bottomAxis),
-    );
+    final graph = Rect.fromLTWH(leftAxis, 0, math.max(1, size.width - leftAxis), math.max(1, size.height - bottomAxis));
     final background = Paint()..color = const Color(0xFF11111B);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(10)),
-      background,
-    );
+    canvas.drawRRect(RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(10)), background);
     final visibleFrequencies = frequenciesHz.where((value) => value > 0);
-    final lowestSpectrumHz = visibleFrequencies.isEmpty
-        ? 20.0
-        : visibleFrequencies.reduce(math.min);
-    final highestSpectrumHz = visibleFrequencies.isEmpty
-        ? 20000.0
-        : visibleFrequencies.reduce(math.max);
-    final lowestBandHz = bands
-        .map((band) => band.lowerFrequencyHz)
-        .reduce(math.min);
-    final highestBandHz = bands
-        .map((band) => band.upperFrequencyHz)
-        .reduce(math.max);
-    final minimumHz = math.max(
-      1.0,
-      math.min(20.0, math.min(lowestSpectrumHz, lowestBandHz)),
-    );
-    final maximumHz = math.max(
-      minimumHz * 1.01,
-      math.max(highestSpectrumHz, highestBandHz),
-    );
+    final lowestSpectrumHz = visibleFrequencies.isEmpty ? 20.0 : visibleFrequencies.reduce(math.min);
+    final highestSpectrumHz = visibleFrequencies.isEmpty ? 20000.0 : visibleFrequencies.reduce(math.max);
+    final lowestBandHz = bands.map((band) => band.lowerFrequencyHz).reduce(math.min);
+    final highestBandHz = bands.map((band) => band.upperFrequencyHz).reduce(math.max);
+    final minimumHz = math.max(1.0, math.min(20.0, math.min(lowestSpectrumHz, lowestBandHz)));
+    final maximumHz = math.max(minimumHz * 1.01, math.max(highestSpectrumHz, highestBandHz));
     double xForFrequency(double frequencyHz) {
       final clamped = frequencyHz.clamp(minimumHz, maximumHz).toDouble();
-      final fraction =
-          math.log(clamped / minimumHz) / math.log(maximumHz / minimumHz);
+      final fraction = math.log(clamped / minimumHz) / math.log(maximumHz / minimumHz);
       return graph.left + graph.width * fraction;
     }
 
     double yForDbfs(double dbfs) {
-      final normalized =
-          ((dbfs.clamp(_minimumDbfs, 0.0) - _minimumDbfs) / -_minimumDbfs)
-              .toDouble();
+      final normalized = ((dbfs.clamp(_minimumDbfs, 0.0) - _minimumDbfs) / -_minimumDbfs).toDouble();
       return graph.bottom - graph.height * normalized;
     }
 
     double dbfsForLevel(double level) {
       if (level <= 0) return _minimumDbfs;
-      return (20 * math.log(level) / math.ln10)
-          .clamp(_minimumDbfs, 0.0)
-          .toDouble();
+      return (20 * math.log(level) / math.ln10).clamp(_minimumDbfs, 0.0).toDouble();
     }
 
     final gridPaint = Paint()
@@ -524,19 +495,13 @@ class _SpectrumPainter extends CustomPainter {
       final color = _spectrumBandColor(entry.$1);
       final left = xForFrequency(band.lowerFrequencyHz);
       final right = xForFrequency(band.upperFrequencyHz);
-      canvas.drawRect(
-        Rect.fromLTRB(left, graph.top, right, graph.bottom),
-        Paint()..color = color.withValues(alpha: 0.14),
-      );
+      canvas.drawRect(Rect.fromLTRB(left, graph.top, right, graph.bottom), Paint()..color = color.withValues(alpha: 0.14));
       final thresholdPaint = Paint()
         ..color = color.withValues(alpha: 0.9)
         ..strokeWidth = 1.3;
       final thresholds = switch (band.mode) {
         MultibandEqBandMode.gate => <double>[band.gateThreshold!],
-        MultibandEqBandMode.level => <double>[
-          band.normalizationMinimum!,
-          band.normalizationMaximum!,
-        ],
+        MultibandEqBandMode.level => <double>[band.normalizationMinimum!, band.normalizationMaximum!],
       };
       for (final threshold in thresholds) {
         final y = yForDbfs(threshold);
@@ -544,13 +509,7 @@ class _SpectrumPainter extends CustomPainter {
       }
       if (right - left >= 56) {
         final mode = band.mode == MultibandEqBandMode.gate ? 'Gate' : 'Level';
-        _paintText(
-          canvas,
-          '${band.id} · $mode',
-          Offset(left + 4, graph.top + 4),
-          color,
-          9,
-        );
+        _paintText(canvas, '${band.id} · $mode', Offset(left + 4, graph.top + 4), color, 9);
       }
     }
 
@@ -558,10 +517,7 @@ class _SpectrumPainter extends CustomPainter {
       final line = Path();
       final fill = Path();
       for (var index = 0; index < values.length; index++) {
-        final point = Offset(
-          xForFrequency(frequenciesHz[index]),
-          yForDbfs(dbfsForLevel(values[index])),
-        );
+        final point = Offset(xForFrequency(frequenciesHz[index]), yForDbfs(dbfsForLevel(values[index])));
         if (index == 0) {
           line.moveTo(point.dx, point.dy);
           fill
@@ -586,13 +542,7 @@ class _SpectrumPainter extends CustomPainter {
     }
   }
 
-  void _paintText(
-    Canvas canvas,
-    String text,
-    Offset offset,
-    Color color,
-    double size,
-  ) {
+  void _paintText(Canvas canvas, String text, Offset offset, Color color, double size) {
     final painter = TextPainter(
       text: TextSpan(
         text: text,
@@ -605,7 +555,5 @@ class _SpectrumPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _SpectrumPainter old) =>
-      old.values != values ||
-      old.frequenciesHz != frequenciesHz ||
-      old.bands != bands;
+      old.values != values || old.frequenciesHz != frequenciesHz || old.bands != bands;
 }

@@ -51,8 +51,8 @@ enum MacroRuntimeSessionEventKind {
 
 /// Compact, transient telemetry derived from a runtime event.
 ///
-/// This intentionally has no PCM payload. It carries only an RMS dBFS meter
-/// reading and a decimated frequency spectrum that the macro editor can draw.
+/// This intentionally has no PCM payload. It carries only a compact RMS dBFS
+/// meter reading for the microphone presentation module.
 final class MacroRuntimeTelemetry {
   const MacroRuntimeTelemetry({
     required this.sourcePortId,
@@ -60,7 +60,6 @@ final class MacroRuntimeTelemetry {
     required this.sequence,
     this.level,
     this.inputLevelDbfs,
-    this.spectrum,
   });
 
   final String sourcePortId;
@@ -71,35 +70,6 @@ final class MacroRuntimeTelemetry {
   /// Root-mean-square microphone level in dBFS, clamped to the visible
   /// -72…0 dBFS range. This is transient presentation telemetry only.
   final double? inputLevelDbfs;
-
-  /// A decimated, frequency-addressable audio spectrum for the editor.
-  ///
-  /// The visual analyzer must not be used as a control input: the EQ trigger
-  /// remains the source of truth for all runtime band calculations.
-  final MacroRuntimeSpectrum? spectrum;
-}
-
-/// One in-memory spectrum snapshot for the macro editor.
-///
-/// Levels are linear, normalized amplitudes in the inclusive range 0…1;
-/// [frequenciesHz] gives each corresponding bin centre. No PCM is retained.
-final class MacroRuntimeSpectrum {
-  MacroRuntimeSpectrum({
-    required Iterable<double> frequenciesHz,
-    required Iterable<double> levels,
-    required this.sampleRateHz,
-  }) : frequenciesHz = List<double>.unmodifiable(frequenciesHz),
-       levels = List<double>.unmodifiable(levels) {
-    if (this.frequenciesHz.length != this.levels.length) {
-      throw ArgumentError(
-        'Spectrum frequencies and levels must have the same length.',
-      );
-    }
-  }
-
-  final List<double> frequenciesHz;
-  final List<double> levels;
-  final int sampleRateHz;
 }
 
 /// One UI-safe diagnostic event from a macro runtime session.
@@ -251,12 +221,25 @@ final class MacroRuntimeSessionController
   // completed the restoration path it inherited from the previous session.
   final Map<String, Set<Completer<void>>> _launchCompletions =
       <String, Set<Completer<void>>>{};
+  // Raw runtime events can arrive much faster than the editor should rebuild.
+  // Presentation modules independently interpret only their own event types;
+  // this controller owns neither visual analysis nor node-specific settings.
+  final Map<String, StreamController<TriggerEvent>> _runtimeFrameFeeds =
+      <String, StreamController<TriggerEvent>>{};
   final StreamController<MacroRuntimeSessionEvent> _events =
       StreamController<MacroRuntimeSessionEvent>.broadcast();
   var _disposed = false;
 
   /// A live diagnostic stream. Consumers must cancel their own subscription.
   Stream<MacroRuntimeSessionEvent> get events => _events.stream;
+
+  /// Live, unpersisted runtime events for one running macro.
+  ///
+  /// The stream is absent while the macro is not running. Frames are delivered
+  /// synchronously and are deliberately not buffered; a concrete presentation
+  /// module decides how to coalesce and render its own data.
+  Stream<Object>? runtimeFramesFor(String macroId) =>
+      _runtimeFrameFeeds[macroId]?.stream;
 
   @override
   MacroRuntimeSessionsState build() {
@@ -418,6 +401,7 @@ final class MacroRuntimeSessionController
     }
     try {
       _active[macroId] = candidate;
+      _ensureRuntimeFrameFeed(macroId);
       runtime.start();
       // Some source/modifier nodes emit synchronously from start(). Preserve
       // those first output values for the patcher and input-priority UI rather
@@ -437,6 +421,7 @@ final class MacroRuntimeSessionController
       // A source can fail while starting after an eager modifier already
       // emitted. Treat that as a stopped macro run and restore its baseline.
       await candidate.stopAndRestore();
+      _disposeRuntimeFrameFeed(macroId);
       _reportLaunchFailure(
         macroId: macroId,
         error: error,
@@ -529,6 +514,9 @@ final class MacroRuntimeSessionController
     final session = _active.remove(macroId);
     if (session != null) await session.stopAndRestore();
     await Future.wait(pendingLaunches);
+    if (!_active.containsKey(macroId)) {
+      _disposeRuntimeFrameFeed(macroId);
+    }
     if (!_disposed) {
       _setStatus(
         MacroRuntimeSessionStatus(
@@ -546,6 +534,11 @@ final class MacroRuntimeSessionController
       _advanceRunGeneration(entry.key);
     }
     await Future.wait(active.map((entry) => entry.value.stopAndRestore()));
+    final runtimeFrameFeeds = _runtimeFrameFeeds.values.toList(growable: false);
+    _runtimeFrameFeeds.clear();
+    for (final feed in runtimeFrameFeeds) {
+      unawaited(feed.close());
+    }
     await _events.close();
   }
 
@@ -576,6 +569,14 @@ final class MacroRuntimeSessionController
   }
 
   void _onRuntimeEvent(String macroId, TriggerEvent event) {
+    // The generic runtime only forwards raw typed data. A node presentation
+    // module owns any visualization and decides whether this event is one of
+    // its connected inputs.
+    final runtimeFrameFeed = _runtimeFrameFeeds[macroId];
+    if (runtimeFrameFeed != null && !runtimeFrameFeed.isClosed) {
+      runtimeFrameFeed.add(event);
+    }
+
     final value = event.primaryValue;
     if (value is TriggerGateValue ||
         value is TriggerLevelValue ||
@@ -585,9 +586,9 @@ final class MacroRuntimeSessionController
     }
     if (value is! TriggerMonoAudioValue) return;
 
-    // The microphone may deliver smaller frames faster than Flutter should
-    // repaint. Sampling at the EQ's default 50 ms cadence keeps the editor
-    // visibly live without turning a source stream into a rebuild storm.
+    // Compact session telemetry also feeds non-spectrum UI such as the level
+    // meter. Keep it low-frequency so the macro editor itself does not rebuild
+    // for every microphone frame.
     final previousTelemetry = state.sessions[macroId]?.lastTelemetry;
     if (previousTelemetry != null &&
         event.timestamp >= previousTelemetry.timestamp &&
@@ -603,9 +604,22 @@ final class MacroRuntimeSessionController
         timestamp: event.timestamp,
         sequence: event.sequence,
         inputLevelDbfs: _dbfsFromSamples(value.values),
-        spectrum: _spectrumFromMono(value),
       ),
     );
+  }
+
+  void _ensureRuntimeFrameFeed(String macroId) {
+    _runtimeFrameFeeds.putIfAbsent(
+      macroId,
+      () => StreamController<TriggerEvent>.broadcast(sync: true),
+    );
+  }
+
+  void _disposeRuntimeFrameFeed(String macroId) {
+    final feed = _runtimeFrameFeeds.remove(macroId);
+    if (feed != null && !feed.isClosed) {
+      unawaited(feed.close());
+    }
   }
 
   void _onOutputValue(String macroId, String outputPortId, TriggerValue value) {
@@ -631,69 +645,6 @@ final class MacroRuntimeSessionController
     if (rms <= 0) return -72;
     final dbfs = 20 * math.log(rms) / math.ln10;
     return dbfs.clamp(-72.0, 0.0).toDouble();
-  }
-
-  /// Produces a short visual spectrum and immediately discards PCM samples.
-  ///
-  /// This is deliberately presentation telemetry, not an audio-analysis
-  /// contract. Runtime modules remain the source of lighting decisions.
-  static MacroRuntimeSpectrum _spectrumFromMono(TriggerMonoAudioValue audio) {
-    const maximumBars = 36;
-    final samples = audio.values;
-    // A two-point Hann window has no non-zero samples, so it cannot produce
-    // a meaningful normalized spectrum. The dB meter still uses that frame.
-    if (samples.length < 3) {
-      return MacroRuntimeSpectrum(
-        frequenciesHz: const <double>[],
-        levels: const <double>[],
-        sampleRateHz: audio.sampleRateHz,
-      );
-    }
-    // A bounded DFT frame is sufficient for the UI analyser. The EQ retains
-    // its own deterministic DSP path and does not depend on this display work.
-    final frameSize = math.min(samples.length, 1024);
-    final maximumBin = frameSize ~/ 2;
-    final binNumbers = <int>{};
-    for (var index = 0; index < maximumBars; index++) {
-      final fraction = maximumBars == 1 ? 0.0 : index / (maximumBars - 1);
-      final bin = math.pow(maximumBin, fraction).round().clamp(1, maximumBin);
-      binNumbers.add(bin.toInt());
-    }
-    final bins = binNumbers.toList()..sort();
-    var windowSum = 0.0;
-    final windowed = List<double>.generate(frameSize, (index) {
-      final window =
-          0.5 - 0.5 * math.cos((2 * math.pi * index) / (frameSize - 1));
-      windowSum += window;
-      return samples[index] * window;
-    }, growable: false);
-    final frequencies = <double>[];
-    final levels = <double>[];
-    for (final bin in bins) {
-      // Goertzel has the same relevant single-bin DFT magnitude while avoiding
-      // a trigonometric call for every source sample and visual bar.
-      final coefficient = 2 * math.cos((2 * math.pi * bin) / frameSize);
-      var previous = 0.0;
-      var previousPrevious = 0.0;
-      for (final sample in windowed) {
-        final next = sample + coefficient * previous - previousPrevious;
-        previousPrevious = previous;
-        previous = next;
-      }
-      final power = math.max(
-        0.0,
-        previousPrevious * previousPrevious +
-            previous * previous -
-            coefficient * previous * previousPrevious,
-      );
-      frequencies.add(bin * audio.sampleRateHz / frameSize);
-      levels.add((2 * math.sqrt(power) / windowSum).clamp(0.0, 1.0).toDouble());
-    }
-    return MacroRuntimeSpectrum(
-      frequenciesHz: frequencies,
-      levels: levels,
-      sampleRateHz: audio.sampleRateHz,
-    );
   }
 
   void _setStatus(MacroRuntimeSessionStatus status) {

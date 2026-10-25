@@ -102,3 +102,45 @@
   - Verify: target-module and editor widget tests; `flutter analyze`; `flutter
     test`.
   - Files: lighting-target module, Macro editor, focused tests and docs.
+
+## Dual-mode PCM Normalization modifier
+
+- [x] Task 1: Pure normalization contract and runtime
+  - Acceptance: an `N`-second RMS dBFS history maps relative dynamics to
+    `-72..0 dBFS`; PCM mode emits bounded PCM with the input sample rate, and
+    value mode emits bounded `0..1` values.
+  - Verify: focused modifier unit tests.
+  - Files: `core/macros/modifiers/normalization/*`, runtime registry and tests.
+
+- [x] Task 2: Editor module and mode-safe graph mutation
+  - Acceptance: the palette adds one Normalization node; its inspector changes
+    duration/mode and a mode switch removes only edges that become
+    incompatible.
+  - Verify: presentation/widget tests.
+  - Files: normalization editor module, module registry, macro editor and tests.
+
+- [x] Task 3: Documentation and full verification
+  - Acceptance: Macro documentation describes both PCM/value modes and their
+    transient dBFS history; analyzer, test suite and macOS debug build pass.
+  - Verify: documented commands in `NORMALIZATION_MODIFIER.md`.
+  - Files: Macro docs and task tracking.
+
+## Normalization waveform visualization
+
+- [x] Task 1: Bounded visualization history and renderer
+  - Acceptance: PCM and value modes retain no data older than their selected
+    display duration and create immutable render snapshots.
+  - Verify: focused history/widget tests.
+  - Files: normalization waveform presentation files and tests.
+
+- [x] Task 2: Normalization-inspector integration
+  - Acceptance: one overlay graph and duration slider render only the selected
+    Normalization node's input/output runtime events; zoom-out has no backfill.
+  - Verify: focused node-module widget tests.
+  - Files: normalization editor node module and tests.
+
+- [x] Task 3: Documentation and full verification
+  - Acceptance: documentation covers PCM and `0..1` timeline modes, bounded
+    retention and transient lifecycle; checks pass.
+  - Verify: `flutter analyze`, `flutter test`, `flutter build macos --debug`.
+  - Files: Macro documentation and task tracking.

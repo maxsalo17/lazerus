@@ -513,10 +513,13 @@ state snapshot: the editor has no transport access, and Stop performs a bounded
 best-effort restoration only for devices that macro writes actually changed.
 
 The initial microphone module is a narrow PCM16 mono-stream adapter with
-explicit permission/session state, while the Multiband EQ is a pure Dart module
-that receives only `TriggerMonoAudioValue`. Microphone bytes are transient and
-never become macro JSON; the EQ has no import of the microphone implementation.
-Both are registered together only by the app composition root.
+explicit permission/session state. The pure Dart Normalization modifier can
+transform this stream before the Multiband EQ, either keeping a normalized
+`TriggerMonoAudioValue` stream or deriving a `triggerLevel` control value from
+its transient rolling dBFS history. Microphone bytes, PCM history and derived
+gains never become macro JSON; neither the Normalization modifier nor the EQ
+imports the microphone implementation. They are registered together only by
+the app composition root.
 
 ## Verification requirements
 

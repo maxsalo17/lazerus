@@ -100,6 +100,18 @@ range, smoothing and output-buffer duration. Configured ports are regenerated
 from those stable IDs. PCM frames, spectral data and filter state remain
 runtime-only.
 
+The Normalization modifier persists only `outputMode` (`pcm` or `value`) and
+`windowDurationMilliseconds`. It derives a rolling RMS dBFS range from
+transient PCM frames: PCM mode retains the `triggerMonoAudio` output type,
+while value mode regenerates its output as `triggerLevel`. Its PCM, frame-level
+dBFS history and gain are runtime-only.
+
+The Normalization inspector's waveform display is also runtime-only. PCM mode
+retains cropped input/output samples only for its selected display duration;
+value mode retains only `0..1` input-level/output-value points for that same
+duration. The display duration is not a persisted Macro setting, and expanding
+it cannot recover discarded history.
+
 See [`MACRO_SYSTEM.md`](MACRO_SYSTEM.md) for the macro architecture and
 runtime/delivery rules, and [`COLOR_CALIBRATION.md`](COLOR_CALIBRATION.md) for
 the editor and preview behaviour.

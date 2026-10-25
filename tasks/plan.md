@@ -43,3 +43,23 @@
    and explicitly replace one with a capability-compatible discovered device.
 4. Cover contract, import error, mapping and widget flows; document format and
    run Flutter checks.
+
+## Plan: dual-mode PCM Normalization modifier
+
+1. Add a typed, transient normalization modifier with an `N`-second dBFS RMS
+   history and dynamic `pcm` / `value` output-port contracts.
+2. Register the module in runtime and editor composition roots, then expose
+   mode and window-duration controls in a dedicated inspector.
+3. Update generic editor replacement to remove connections whose port type
+   changes, preventing stale incompatible edges after a mode switch.
+4. Cover DSP, ports, configuration, editor behavior and graph cleanup with
+   focused tests; update Macro documentation and run Flutter verification.
+
+## Plan: Normalization waveform visualization
+
+1. Add a presentation-only, duration-bounded history for overlaying PCM
+   input/output frames and `0..1` input/output level points.
+2. Add a VSync-coalesced waveform card plus display-duration slider to the
+   Normalization inspector, consuming only its connected runtime frame ports.
+3. Prove trim, zoom-out and mode behavior with focused tests; document the
+   no-backfill/no-persistence limits and run Flutter verification.

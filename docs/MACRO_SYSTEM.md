@@ -17,10 +17,12 @@ lighting command through the active protocol session.
 
 ```text
 Microphone
-  └─ triggerMonoAudio ──> Multiband EQ
-                                ├─ low level/gate ──> Device brightness/power
-                                ├─ mid level/gate ──> Device brightness/power
-                                └─ high level/gate ─> Device brightness/power
+  └─ triggerMonoAudio ──> Normalization
+                              ├─ PCM ──> Multiband EQ
+                              │             ├─ low level/gate ──> Device brightness/power
+                              │             ├─ mid level/gate ──> Device brightness/power
+                              │             └─ high level/gate ─> Device brightness/power
+                              └─ Value ──> Device brightness
 
 Colour source ──> Colour + brightness ──> Device colour
 ```
@@ -130,6 +132,17 @@ module registry is the presentation composition root.
   PCM buffers are never persisted.
 - `trigger.multiband_eq` accepts mono audio and exposes dynamic, persisted
   band outputs. A band emits a `triggerGate` or `triggerLevel` value.
+- `modifier.normalization` accepts mono PCM and retains a transient rolling
+  RMS dBFS range for the selected N-second window. Its persisted mode is
+  either `pcm` (normalized `triggerMonoAudio` for further audio processing) or
+  `value` (normalized `triggerLevel` in `0..1` for brightness/HSV Value).
+  PCM buffers and the rolling history are never persisted. Changing modes
+  updates the output port contract and removes only connections that are no
+  longer type-compatible. Its inspector can show a transient, VSync-coalesced
+  overlay: PCM input/output waves in `pcm` mode, or the input's fixed dBFS
+  level and the normalized `0..1` value in `value` mode. The graph slider
+  bounds retained data to its currently displayed time window; zooming out
+  never restores discarded samples and may wait for the larger window to fill.
 - `modifier.color` is a manual HSV source with a compact hue picker.
 - `modifier.color_brightness_combine` takes HSV plus normalized level and
   replaces HSV Value; its output remains HSV.
@@ -142,7 +155,20 @@ The EQ shows an in-memory dBFS spectrum while running. Its persisted bands have
 frequency bounds, mode, threshold or level limits, smoothing and a peak-hold
 output buffer. `0` milliseconds means immediate delivery; the default 50 ms
 window emits the greatest level, or any `true` gate, observed in that interval.
-Display telemetry does not affect the DSP calculation and is not persisted.
+The generic runtime forwards unbuffered raw `TriggerEvent`s only. The EQ
+presentation module filters events to the source port connected to its own
+input, derives its display spectrum, then renders through Flutter's VSync
+ticker while dropping intermediate frames rather than queueing repaints.
+Compact runtime telemetry and the microphone meter remain independently
+rate-limited. Display telemetry does not affect the DSP calculation and is not
+persisted.
+
+The EQ visual module uses up to a 2,048-sample window and 256 logarithmically
+spaced frequency points. `TriggerMonoAudioValue` always carries the source
+sample rate, so its frequency axis is calculated from the actual capture rate.
+At the default 44.1 kHz rate, a full window has approximately 21.5 Hz
+frequency-bin resolution; smaller platform PCM frames cannot provide more
+input resolution until a future rolling display window is introduced.
 
 ## Runtime and delivery
 
